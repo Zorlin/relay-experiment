@@ -685,14 +685,13 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let gossipsub_config = libp2p::gossipsub::ConfigBuilder::default()
             .max_transmit_size(1024 * 1024) // 1MB max message size - matches TS's 1e6
             .heartbeat_interval(Duration::from_secs(20))
-            .validation_mode(ValidationMode::Permissive) // Allow all messages
+            .validation_mode(ValidationMode::Permissive) // Allow all messages - equivalent to canRelayMessage=true
             .mesh_outbound_min(2) // Ensure outbound connections for proper relay
             .mesh_n_low(2) // Lower threshold for mesh maintenance
             .allow_self_origin(true) // Allow receiving our own messages
             .duplicate_cache_time(Duration::from_secs(1)) // Shorter duplicate cache to avoid missing messages
-            .validate_messages() // Enable message validation
-            // Note: The Rust implementation doesn't have direct equivalents for some JS options
-            // but we can ensure proper message forwarding by configuring the mesh parameters
+            // Note: The Rust implementation doesn't have direct equivalents for allowPublishToZeroTopicPeers
+            // but we can ensure better relaying by configuring more mesh parameters:
             .mesh_n(8) // Aim for this many peers in each topic's mesh (equivalent to D in GossipSubParams)
             .fanout_ttl(Duration::from_secs(60)) // Keep fanout peers for topics we publish but don't subscribe to
             .gossip_lazy(6) // Number of non-mesh peers to send gossip to
@@ -1208,6 +1207,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         info!("Peer {} subscribed to topic: {}", peer_id, topic);
                                         let topic_name = topic.to_string();
 
+                                        // Check if this is an Orbiter peer discovery topic
+                                        if topic_name.contains("orbiter") || topic_name.contains("_peer-discovery") {
+                                            info!("IMPORTANT: Detected Orbiter discovery topic: {}", topic_name);
+                                        }
+
                                         // Recreate the Topic type from the hash/name for subscribe call
                                         let topic_to_subscribe = Sha256Topic::new(topic_name.clone());
 
@@ -1264,7 +1268,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         }
                                     }
                                     GossipsubEvent::Message { message, .. } => {
-                                        info!("Received PubSub message: {:?}, Topic={}, Data='{}'", message.source, message.topic, String::from_utf8_lossy(&message.data));
+                                        info!("Received PubSub message: {:?}, Topic={}, Data size={}", message.source, message.topic, message.data.len());
                                         
                                         // Check if this is a peer discovery message
                                         if message.topic.as_str() == peer_disc_topic.hash().as_str() {
@@ -1318,16 +1322,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 warn!("Received invalid peer discovery message");
                                             }
                                         } else {
-                                            // Handle regular pubsub message - just log it for now
-                                            info!(
-                                                "Received PubSub message: From={:?}, Topic={}, Data='{}'",
-                                                message.source,
-                                                message.topic,
-                                                String::from_utf8_lossy(&message.data)
-                                            );
+                                            // Only display message data for small messages to avoid flooding logs
+                                            if message.data.len() < 200 {
+                                                info!("Message content: '{}'", String::from_utf8_lossy(&message.data));
+                                            }
                                             
-                                            // The message is automatically relayed by GossipSub to all subscribers
-                                            info!("Handling message for topic {} - will be relayed to all subscribed peers", message.topic);
+                                            // The message is automatically relayed by GossipSub to all subscribed peers
+                                            info!("Relaying message for topic {} to all subscribed peers", message.topic);
+
+                                            // Ensure we are still subscribed to this topic to relay properly
+                                            let topic_to_ensure = Sha256Topic::new(message.topic.to_string());
+                                            if let Err(e) = swarm.behaviour_mut().pubsub.subscribe(&topic_to_ensure) {
+                                                warn!("Error ensuring subscription to topic {}: {}", message.topic, e);
+                                            }
                                         }
                                     }
                                     _ => {
