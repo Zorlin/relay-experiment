@@ -650,6 +650,11 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .max_transmit_size(1024 * 1024) // 1MB max message size
             .heartbeat_interval(Duration::from_secs(20))
             .validation_mode(ValidationMode::Permissive) // Allow all messages
+            .mesh_outbound_min(2) // Ensure outbound connections for proper relay
+            .mesh_n_low(2) // Lower threshold for mesh maintenance
+            .allow_self_origin(true) // Allow receiving our own messages
+            .duplicate_cache_time(Duration::from_secs(1)) // Shorter duplicate cache to avoid missing messages
+            .validate_messages() // Enable message validation
             .build()
             .expect("Valid GossipSub configuration");
         
@@ -912,17 +917,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.listen_on(listen_addr_ws)?;
 
     // Also listen on WebRTC multiaddr for direct peer connections
-    match swarm.listen_on("/webrtc".parse()?) {
-        Ok(listener_id) => info!("Listening on WebRTC with listener ID: {:?}", listener_id),
-        Err(e) => warn!("Failed to listen on WebRTC: {}", e),
+    match swarm.listen_on("/ip4/0.0.0.0/udp/0/webrtc-direct".parse()?) {
+        Ok(listener_id) => info!("Listening on WebRTC-direct with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on WebRTC-direct: {}", e),
     }
     
     // Only add explicit WebRTC IP-based address when no domain is provided
     if domain_name.is_none() {
         // Add explicit WebRTC address for our peer ID (helps with discovery)
-        let webrtc_addr: Multiaddr = format!("/webrtc/p2p/{}", local_peer_id).parse()?;
+        let webrtc_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/0/webrtc-direct/p2p/{}", local_peer_id).parse()?;
         swarm.add_external_address(webrtc_addr.clone());
-        info!("Added external WebRTC address: {}", webrtc_addr);
+        info!("Added external WebRTC-direct address: {}", webrtc_addr);
     }
 
     // If a domain name is provided, add external addresses for Nginx proxying
@@ -954,24 +959,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         
         // Also add WebRTC address with domain
-        let webrtc_dns_addr = format!("/dns4/{}/webrtc/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        let webrtc_dns_addr = format!("/dns4/{}/udp/443/webrtc-direct/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
         match webrtc_dns_addr {
             Ok(addr) => {
                 swarm.add_external_address(addr.clone());
-                info!("Advertising WebRTC DNS address: {}", addr);
+                info!("Advertising WebRTC-direct DNS address: {}", addr);
             }
             Err(e) => {
-                error!("Failed to parse WebRTC DNS address from domain {}: {}", domain, e);
+                error!("Failed to parse WebRTC-direct DNS address from domain {}: {}", domain, e);
             }
         }
     } else {
         info!("No domain name provided. Only advertising direct IP-based addresses.");
-    }
-
-    // Listen on WebTransport (QUIC-based, uses UDP)
-    match swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1/webtransport".parse()?) {
-        Ok(_) => info!("Listening on WebTransport UDP."),
-        Err(e) => warn!("Failed to listen on WebTransport UDP: {}", e),
     }
 
     // --- Bootstrap Dialing ---
@@ -1206,6 +1205,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     message.topic,
                                     String::from_utf8_lossy(&message.data)
                                 );
+                                
+                                // The message is automatically relayed by GossipSub when configured properly
+                                // Just log that we're handling it for debugging purposes
+                                info!("Handling message for topic {} - will be relayed to all subscribed peers", message.topic);
                             }
                             _ => {
                                 info!("Other PubSub event: {:?}", pubsub_event);
