@@ -318,6 +318,91 @@ mod tests {
        // We can't easily check if it's *random*, but we know it succeeded.
        let _loaded_keypair = loaded_keypair_result.unwrap();
    }
+
+    // Integration test for peer connection
+    #[tokio::test]
+    async fn test_peer_connects_to_relay() {
+        // Use a short timeout for the test
+        let test_timeout = Duration::from_secs(15); // Increased timeout slightly
+
+        tokio::time::timeout(test_timeout, async {
+            // 1. Setup: Generate keys and build swarms
+            let relay_key = Keypair::generate_ed25519();
+            let relay_peer_id = PeerId::from(relay_key.public());
+            let mut relay_swarm = build_swarm(relay_key, None).await.expect("Relay swarm build failed"); // No pubsub topics needed for this test
+
+            let client_key = Keypair::generate_ed25519();
+            let client_peer_id = PeerId::from(client_key.public());
+            let mut client_swarm = build_swarm(client_key, None).await.expect("Client swarm build failed"); // No pubsub topics needed
+
+            // 2. Start Relay Listener
+            relay_swarm.listen_on("/ip4/127.0.0.1/tcp/0".parse().unwrap()).expect("Relay listen failed");
+
+            // 3. Get Relay Listening Address
+            let relay_addr = loop {
+                if let Some(SwarmEvent::NewListenAddr { address, .. }) = relay_swarm.next().await {
+                    // Ensure it's not a loopback WebSocket address if WS is enabled by default elsewhere
+                    // For this test, we expect the TCP listener.
+                    if address.to_string().contains("/tcp/") {
+                         println!("Relay listening on: {}", address); // Use println for test output
+                         break address;
+                    }
+                }
+                // Add a small delay to prevent tight looping if the event isn't immediate
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            };
+
+            // 4. Client Dials Relay
+            client_swarm.dial(relay_addr.clone()).expect("Client dial failed");
+            println!("Client ({}) dialing Relay ({}) at {}", client_peer_id, relay_peer_id, relay_addr);
+
+            // 5. Event Loop: Wait for connection
+            let mut client_connected = false;
+            let mut relay_saw_client = false;
+
+            loop {
+                tokio::select! {
+                    // Poll Relay Swarm
+                    relay_event = relay_swarm.select_next_some() => {
+                        if let SwarmEvent::ConnectionEstablished { peer_id, .. } = relay_event {
+                            println!("Relay saw connection from: {}", peer_id);
+                            if peer_id == client_peer_id {
+                                relay_saw_client = true;
+                            }
+                        }
+                        // Optional: Log other relay events for debugging
+                        // else { println!("Relay event: {:?}", relay_event); }
+                    },
+                    // Poll Client Swarm
+                    client_event = client_swarm.select_next_some() => {
+                         if let SwarmEvent::ConnectionEstablished { peer_id, .. } = client_event {
+                            println!("Client saw connection to: {}", peer_id);
+                            if peer_id == relay_peer_id {
+                                client_connected = true;
+                            }
+                        }
+                        // Optional: Log other client events for debugging
+                        // else { println!("Client event: {:?}", client_event); }
+                    },
+                    // Timeout guard (handled by outer tokio::time::timeout)
+                    // _ = tokio::time::sleep(Duration::from_secs(10)) => { // Inner timeout as safeguard
+                    //     panic!("Test timed out waiting for connection");
+                    // }
+                }
+
+                // Check if connection is established from both perspectives
+                if client_connected && relay_saw_client {
+                    println!("Connection successfully established between client and relay.");
+                    break; // Success
+                }
+            }
+
+            // 6. Assertions (already implicitly checked by reaching the end without panic/timeout)
+            assert!(client_connected, "Client should have connected to the relay");
+            assert!(relay_saw_client, "Relay should have seen the client connection");
+
+        }).await.expect("Test timed out"); // Panic if the outer timeout expires
+    }
 }
 
 impl From<ping::Event> for RelayEvent {
@@ -440,6 +525,81 @@ fn load_keypair_from_env() -> Result<Keypair, Box<dyn Error>> {
     }
 }
 
+// Helper function to build a configured Swarm
+async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Result<libp2p::swarm::Swarm<RelayBehaviour>, Box<dyn Error>> {
+    let local_peer_id = PeerId::from(local_key.public());
+    info!("Building swarm for Peer ID: {}", local_peer_id); // Added logging
+
+    // Create the Identify behaviour configuration
+    let identify_config = identify::Config::new(
+        "/libp2p-relay-rust/0.1.0".to_string(),
+        local_key.public(),
+    )
+    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
+
+    // Build the transport
+    let transport = {
+        let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
+            .upgrade(Version::V1Lazy)
+            .authenticate(noise::Config::new(&local_key)?)
+            .multiplex(libp2p::yamux::Config::default())
+            .timeout(Duration::from_secs(20))
+            .boxed();
+
+        let ws_transport = libp2p::websocket::WsConfig::new(
+            libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
+        )
+            .upgrade(Version::V1Lazy)
+            .authenticate(noise::Config::new(&local_key)?)
+            .multiplex(libp2p::yamux::Config::default())
+            .timeout(Duration::from_secs(20))
+            .boxed();
+
+        let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
+
+        {
+            let dns = TokioDnsConfig::system(tcp_or_ws_transport)?;
+            dns.map(|either, _| match either {
+                Either::Left((peer_id, muxer)) | Either::Right((peer_id, muxer)) => (peer_id, muxer),
+            }).boxed()
+        }
+    };
+
+    // Create the behaviour
+    let behaviour = {
+        let mut gossipsub = Gossipsub::new(
+            MessageAuthenticity::Signed(local_key.clone()), // Use the passed-in key
+            GossipsubConfig::default(),
+        )?; // Added ? for error handling
+        if let Some(topics_str) = &pubsub_topics {
+            for name in topics_str.split(',') {
+                let topic = Sha256Topic::new(name.trim());
+                if gossipsub.subscribe(&topic).is_err() {
+                     error!("Failed to subscribe to topic: {}", name.trim()); // Log subscription errors
+                } else {
+                     info!("Peer {} subscribed to topic: {}", local_peer_id, name.trim());
+                }
+            }
+        }
+        RelayBehaviour {
+           relay: relay::Behaviour::new(local_peer_id, Default::default()),
+           ping: ping::Behaviour::new(ping::Config::new()),
+           identify: identify::Behaviour::new(identify_config),
+           pubsub: gossipsub,
+       }
+    };
+
+    // Build the Swarm
+    let swarm = SwarmBuilder::with_existing_identity(local_key) // Use the passed-in key
+        .with_tokio()
+        .with_other_transport(|_| Ok(transport))? // Pass the built transport
+        .with_behaviour(|_| Ok(behaviour))? // Pass the built behaviour
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        .build();
+
+    Ok(swarm)
+}
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -482,81 +642,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
 
-    // Transport construction is now handled by SwarmBuilder below.
-    // We only need the configurations.
-
-    // Create the Identify behaviour configuration
-    // Note: The Identify protocol ID is now recommended to be just "/ipfs/id/1.0.0"
-    // but we keep the custom one for now.
-    let identify_config = identify::Config::new(
-        "/libp2p-relay-rust/0.1.0".to_string(),
-        local_key.public(),
-    )
-    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
-    // Note: .with_max_concurrent_pushes(1000) was removed as it doesn't exist on identify::Config
-
-
-    // Build the transport: Combine DNS, TCP, and WebSocket
-    let transport = {
-        // Create TCP transport
-        let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
-            .upgrade(Version::V1Lazy)
-            .authenticate(noise::Config::new(&local_key)?)
-            .multiplex(libp2p::yamux::Config::default())
-            .timeout(Duration::from_secs(20)) // Add connection timeout
-            .boxed();
-
-        // Create WebSocket transport using WsConfig
-        let ws_transport = libp2p::websocket::WsConfig::new(
-            libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
-        )
-            // Apply the same upgrade and authentication as TCP
-            .upgrade(Version::V1Lazy)
-            .authenticate(noise::Config::new(&local_key)?)
-            .multiplex(libp2p::yamux::Config::default())
-            .timeout(Duration::from_secs(20)) // Add connection timeout
-            .boxed();
-
-        // Combine TCP and WS transports
-        let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
-
-        // Wrap with DNS resolver and normalize output to (PeerId, StreamMuxerBox)
-        {
-            let dns = TokioDnsConfig::system(tcp_or_ws_transport)?;
-            dns.map(|either, _| match either {
-                Either::Left((peer_id, muxer)) | Either::Right((peer_id, muxer)) => (peer_id, muxer),
-            }).boxed()
-        }
-    };
-
-    // Create the behaviour
-    let behaviour = {
-        // Initialize Gossipsub for PubSub peer discovery
-        let mut gossipsub = Gossipsub::new(
-            MessageAuthenticity::Signed(local_key.clone()),
-            GossipsubConfig::default(),
-        ).unwrap();
-        if let Some(topics_str) = &pubsub_topics {
-            for name in topics_str.split(',') {
-                let topic = Sha256Topic::new(name.trim());
-                let _ = gossipsub.subscribe(&topic);
-            }
-        }
-        RelayBehaviour {
-           relay: relay::Behaviour::new(local_peer_id, Default::default()),
-           ping: ping::Behaviour::new(ping::Config::new()),
-           identify: identify::Behaviour::new(identify_config), // Use identify_config directly
-           pubsub: gossipsub, // Added pubsub
-       }
-    };
-
-    // Build the Swarm using the manually constructed transport and behaviour
-    let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone())
-        .with_tokio()
-        .with_other_transport(|_| Ok(transport))?
-        .with_behaviour(|_| Ok(behaviour))?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
-        .build();
+    // Build the Swarm using the helper function
+    let mut swarm = build_swarm(local_key.clone(), pubsub_topics).await?;
     // Initialize PubSub relayer state
     let mut relay_reqs: HashMap<PeerId, HashSet<String>> = HashMap::new();
     let always_relay: Vec<String> = vec!["réseau-constellation".to_string()];
