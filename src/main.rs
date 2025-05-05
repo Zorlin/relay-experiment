@@ -475,8 +475,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     SwarmEvent::Behaviour(RelayEvent::Relay(event)) => {
                         // Handle events emitted by the relay::Behaviour
-                        // These events are related to this node acting *as* a relay (stop/hop)
-                        info!("Relay event: {:?}", event);
+                        // Log when clients request or are accepted as relay
+                        match event {
+                            relay::Event::ReservationReqReceived { src_peer_id, .. } => {
+                                info!("New relay reservation request from client: {}", src_peer_id);
+                            }
+                            relay::Event::ReservationAccepted { src_peer_id, .. } => {
+                                info!("Client {} successfully reserved relay hop", src_peer_id);
+                            }
+                            _ => {
+                                info!("Relay event: {:?}", event);
+                            }
+                        }
                     }
                     SwarmEvent::Behaviour(RelayEvent::Pubsub(event)) => {
                         // Handle PubSub peer‐discovery events
