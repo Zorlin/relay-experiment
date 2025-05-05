@@ -569,11 +569,12 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let dns_transport = TokioDnsConfig::system(tcp_or_ws_transport)?;
 
         dns_transport
-            .map(|either, _| {
-                let (peer_id, muxer) = match either {
-                    Either::Left((peer_id, muxer)) | Either::Right((peer_id, muxer)) => (peer_id, muxer),
-                };
-                (peer_id, StreamMuxerBox::new(muxer))
+            .map(|either_output, _| {
+                // Separate the match arms to handle potentially different muxer types
+                match either_output {
+                    Either::Left((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                    Either::Right((peer_id, muxer)) => (peer_id, StreamMuxerBox::new(muxer)),
+                }
             })
             .boxed()
     };
