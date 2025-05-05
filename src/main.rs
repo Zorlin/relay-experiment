@@ -10,6 +10,7 @@ use libp2p::{
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
+use libp2p::core::transport::TransportExt;
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
 use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
@@ -549,7 +550,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     .with_interval(Duration::from_secs(600)); // 10 minutes
 
     // Build the transport
-    let transport = {
+    let base_transport = {
         let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
@@ -575,6 +576,12 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             }).boxed()
         }
     };
+    let transport = base_transport
+        .with_connection_limits(ConnectionLimits::default()
+            .with_max_established(Some(500))
+            .with_max_established_per_peer(Some(500))
+        )
+        .boxed();
 
     // Create the behaviour
     let behaviour = {
@@ -609,11 +616,6 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .with_idle_connection_timeout(Duration::from_secs(60))
             // Increase the limit for concurrently negotiating inbound streams significantly
             .with_max_negotiating_inbound_streams(10000)
-            // Increase connection limits from default 5 peers to 500 peers
-            .with_connection_limits(ConnectionLimits::default()
-                .with_max_established(Some(500))
-                .with_max_established_per_peer(Some(500))
-            )
         )
         .build();
 
