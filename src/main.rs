@@ -60,14 +60,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
 
-    // Build the transport
-    // For this example, we use TCP with Noise encryption and Yamux multiplexing.
-    let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
-        .upgrade(upgrade::Version::V1Lazy)
-        .authenticate(noise::Config::new(&local_key)?)
-        .multiplex(libp2p::yamux::Config::default())
-        .timeout(Duration::from_secs(20))
-        .boxed();
+    // Transport construction is now handled by SwarmBuilder below.
+    // We only need the configurations.
 
     // Create the Identify behaviour configuration
     // Note: The Identify protocol ID is now recommended to be just "/ipfs/id/1.0.0"
@@ -104,10 +98,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // The behaviour construction might need the keypair now,
             // although our current RelayBehaviour doesn't directly use it in its constructor.
             // We pass the peer_id derived earlier.
+             // Clone identify_config as it's moved into the closure.
+             let final_identify_config = identify_config.clone();
              RelayBehaviour {
+                // Use the peer_id derived from the key passed to the closure
                 relay: relay::Behaviour::new(PeerId::from(key.public()), Default::default()),
                 ping: ping::Behaviour::new(ping::Config::new()),
-                identify: identify::Behaviour::new(identify_config), // identify_config created earlier
+                identify: identify::Behaviour::new(final_identify_config),
             }
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60))) // Example config
