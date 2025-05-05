@@ -951,6 +951,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
 
+    // Pre-populate the listening addresses with domain addresses if domain is set
+    if let Some(domain) = &domain_name {
+        let mut addrs = listening_addresses.lock();
+        // Add WSS and WebRTC domain addresses explicitly
+        let local_peer_id_str = local_peer_id.to_string();
+        
+        // Add WSS address
+        if let Ok(wss_addr) = format!("/dns4/{}/tcp/443/wss/p2p/{}", domain, local_peer_id_str).parse::<Multiaddr>() {
+            addrs.push(wss_addr);
+            info!("PRE-ADDED WSS DOMAIN ADDRESS to listening addresses: /dns4/{}/tcp/443/wss/p2p/{}", domain, local_peer_id_str);
+        } else {
+            error!("Failed to parse WSS domain address");
+        }
+        
+        // Add WebRTC address
+        if let Ok(webrtc_addr) = format!("/dns4/{}/udp/443/webrtc-direct/p2p/{}", domain, local_peer_id_str).parse::<Multiaddr>() {
+            addrs.push(webrtc_addr);
+            info!("PRE-ADDED WebRTC DOMAIN ADDRESS to listening addresses: /dns4/{}/udp/443/webrtc-direct/p2p/{}", domain, local_peer_id_str);
+        } else {
+            error!("Failed to parse WebRTC domain address");
+        }
+        
+        info!("Pre-populated listening_addresses with {} domain-specific addresses", addrs.len());
+    }
+
     // Build the Swarm
     let mut swarm = build_swarm(local_key.clone(), pubsub_topics).await?;
     let mut relay_reqs: HashMap<PeerId, HashSet<String>> = HashMap::new();
@@ -1074,6 +1099,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Clone Arc for the web server task
     let server_listening_addresses = listening_addresses.clone();
+    let server_local_peer_id = local_peer_id.to_string(); // Clone peer ID for the web server
 
     // Set up peer discovery via PubSub for constellation peers
     let peer_disc_topic = Sha256Topic::new(CONSTELLATION_PEER_DISCOVERY_TOPIC);
@@ -1106,17 +1132,91 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .map(move || warp::reply::html(index_html_content));
 
         // Route for serving listening addresses at /adresses
+        let server_peer_id = server_local_peer_id.clone(); // Clone for the closure
         let addresses_route = warp::path("adresses")
             .and(warp::get()) // Match GET requests
             .map(move || {
                 let addrs = server_listening_addresses.lock();
-                // Filter out loopback addresses like the JS example if desired
-                // let public_addrs: Vec<_> = addrs.iter()
-                //     .filter(|a| !a.to_string().starts_with("/ip4/127.0.0.1"))
-                //     .cloned()
-                //     .collect();
-                // warp::reply::json(&public_addrs) // Use this line to filter
-                warp::reply::json(&*addrs) // Serve all addresses for now
+                
+                // Get the domain name from environment
+                let domain_name = std::env::var("DOMAINE").ok();
+                
+                // Log all addresses for debugging
+                info!("All available addresses before filtering (count: {}):", addrs.len());
+                for (i, addr) in addrs.iter().enumerate() {
+                    info!("  {}: {}", i, addr);
+                }
+
+                // Our filtered addresses list
+                let filtered_addrs: Vec<Multiaddr>;
+                
+                // If we have a domain, ONLY use addresses with that domain
+                if let Some(domain) = &domain_name {
+                    info!("Looking for addresses with domain: {}", domain);
+                    
+                    // Get all addresses containing the domain
+                    let domain_addrs: Vec<_> = addrs.iter()
+                        .filter(|addr| addr.to_string().contains(domain))
+                        .cloned()
+                        .collect();
+                    
+                    if !domain_addrs.is_empty() {
+                        // We found domain addresses, ONLY use these
+                        info!("Found {} addresses with domain {}", domain_addrs.len(), domain);
+                        filtered_addrs = domain_addrs;
+                    } else {
+                        // No domain addresses found - this shouldn't happen now that we pre-populate them,
+                        // but just in case, recreate and use them
+                        warn!("NO DOMAIN ADDRESSES FOUND FOR: {}", domain);
+                        
+                        // Create minimal set with just domain addresses
+                        let mut manual_addrs = Vec::new();
+                        
+                        // Add WSS address
+                        if let Ok(wss_addr) = format!("/dns4/{}/tcp/443/wss/p2p/{}", 
+                                                    domain, server_peer_id).parse::<Multiaddr>() {
+                            manual_addrs.push(wss_addr.clone());
+                            error!("MANUALLY ADDING MISSING WSS ADDRESS: {}", wss_addr);
+                        }
+                        
+                        // Add WebRTC address
+                        if let Ok(webrtc_addr) = format!("/dns4/{}/udp/443/webrtc-direct/p2p/{}", 
+                                                      domain, server_peer_id).parse::<Multiaddr>() {
+                            manual_addrs.push(webrtc_addr.clone());
+                            error!("MANUALLY ADDING MISSING WEBRTC ADDRESS: {}", webrtc_addr);
+                        }
+                        
+                        filtered_addrs = manual_addrs;
+                    }
+                } else {
+                    // No domain set, use regular filtering logic
+                    filtered_addrs = addrs.iter()
+                        .filter(|addr| {
+                            let addr_str = addr.to_string();
+                            let is_secure = addr_str.contains("/wss/") || addr_str.contains("/webrtc");
+                            let is_external = !addr_str.contains("/ip4/0.0.0.0") && 
+                                              !addr_str.contains("/ip4/127.0.0.1");
+                            is_secure && is_external
+                        })
+                        .cloned()
+                        .collect();
+                }
+                
+                // Log what we're advertising
+                info!("Advertising {} filtered addresses:", filtered_addrs.len());
+                for (i, addr) in filtered_addrs.iter().enumerate() {
+                    info!("  {}: {}", i, addr);
+                }
+                
+                if let Some(domain) = &domain_name {
+                    if filtered_addrs.iter().any(|addr| addr.to_string().contains(domain)) {
+                        info!("✓ Domain {} addresses are included in advertised multiaddrs", domain);
+                    } else {
+                        error!("✗ CRITICAL ERROR: No addresses with domain {} in advertised multiaddrs!", domain);
+                    }
+                }
+                
+                warp::reply::json(&filtered_addrs)
             });
 
         let routes = index_route.or(addresses_route);
