@@ -1,17 +1,20 @@
 use futures::stream::StreamExt;
-// Removed duplicate import
 use libp2p::{
-    // Removed unused core::upgrade
+    core::transport::upgrade::Version, // Needed for Websocket upgrade
     identity,
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, Multiaddr, PeerId, SwarmBuilder, // Removed unused Transport
+    tcp, Multiaddr, PeerId, SwarmBuilder, Transport, // Added Transport trait back
+    dns, // Added dns for resolving potentially passed multiaddrs
+    websocket_websys, // Added websocket transport (even though named websys, works server-side too)
 };
 use std::error::Error;
 use std::time::Duration;
-use tokio::time::interval; // Add import for interval timer
-// Removed unused tokio::runtime::Runtime import
+use std::sync::Arc; // Added Arc
+use parking_lot::Mutex; // Using parking_lot::Mutex for better async performance
+use tokio::time::interval;
 use log::{info, error};
+use warp::Filter; // Added warp import
 
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
