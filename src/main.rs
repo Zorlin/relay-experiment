@@ -492,7 +492,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "/libp2p-relay-rust/0.1.0".to_string(),
         local_key.public(),
     )
-    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
+    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")))
+    // Increase the limit for concurrent inbound identify push streams
+    .with_max_concurrent_pushes(1000);
 
 
     // Build the transport: Combine DNS, TCP, and WebSocket
