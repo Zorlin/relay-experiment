@@ -9,7 +9,7 @@ use libp2p::{
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
-use libp2p_connection_limits::{ConnectionLimits, TransportExt};
+use libp2p_connection_limits::{ConnectionLimits, Behaviour as ConnectionLimitBehaviour};
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
 use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
@@ -567,11 +567,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
         let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport);
 
-        let dns_transport = TokioDnsConfig::system(tcp_or_ws_transport)?
-            .with_connection_limits(ConnectionLimits::default()
-                .with_max_established(Some(500))
-                .with_max_established_per_peer(Some(500))
-            );
+        let dns_transport = TokioDnsConfig::system(tcp_or_ws_transport)?;
 
         dns_transport
             .map(|either, _| {
@@ -611,14 +607,16 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     let swarm = SwarmBuilder::with_existing_identity(local_key) // Use the passed-in key
         .with_tokio()
         .with_other_transport(|_| Ok(transport))? // Pass the built transport
-        .with_behaviour(|_| Ok(behaviour))? // Pass the built behaviour
+        .with_behaviour(|_| Ok(ConnectionLimitBehaviour::new(
+            behaviour,
+            ConnectionLimits::default()
+                .with_max_established(Some(500))
+                .with_max_established_per_peer(Some(500))
+        )))? // Wrap in connection‐limits behaviour
         .with_swarm_config(|c| c
             .with_idle_connection_timeout(Duration::from_secs(60))
             // Increase the limit for concurrently negotiating inbound streams significantly
             .with_max_negotiating_inbound_streams(10000)
-            // Increase connection limits from default 5 peers to 500 peers
-            .with_max_established(Some(500))
-            .with_max_established_per_peer(Some(500))
         )
         .build();
 
