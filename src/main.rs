@@ -351,29 +351,44 @@ fn load_keypair_from_env() -> Result<Keypair, Box<dyn Error>> {
                 .or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes()))
                 .map_err(|e| format!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}", e))?;
 
-            // --- Attempt 1: Check if the decoded bytes look like raw Ed25519 secret key (32 bytes) ---
-            // This is the format likely saved by the TypeScript code.
-            if key_bytes.len() == 32 {
-                info!("Decoded base64 data is 32 bytes long. Attempting to load as raw Ed25519 secret key.");
-                // Try converting the Vec<u8> into a mutable [u8; 32] array.
-                let mut secret_bytes: [u8; 32] = key_bytes.as_slice().try_into()
-                    .map_err(|_| "Internal error: Failed to convert 32-byte Vec<u8> to [u8; 32]".to_string())?; // Should not fail if len == 32
+            // --- Attempt 1: Check if the decoded bytes look like the JS library's raw Ed25519 key (64 bytes: secret + public) ---
+            if key_bytes.len() == 64 {
+                info!("Decoded base64 data is 64 bytes long. Assuming JS format (secret + public). Attempting to load using first 32 bytes as Ed25519 secret key.");
+                // Extract the first 32 bytes, assuming they are the secret key.
+                let mut secret_bytes_array: [u8; 32] = key_bytes[0..32].try_into()
+                    .map_err(|_| "Internal error: Failed to extract first 32 bytes from 64-byte key data".to_string())?; // Should not fail
 
-                match Keypair::ed25519_from_bytes(&mut secret_bytes) {
+                match Keypair::ed25519_from_bytes(&mut secret_bytes_array) {
                     Ok(keypair) => {
-                        info!("Successfully loaded Ed25519 identity from CLEF_PRIVEE_RELAI (raw secret bytes format).");
+                        info!("Successfully loaded Ed25519 identity from CLEF_PRIVEE_RELAI (extracted 32 secret bytes from 64-byte JS format).");
+                        return Ok(keypair); // Success! Return early.
+                    }
+                    Err(e) => {
+                        warn!("Failed to create Ed25519 keypair from extracted 32 bytes (from 64-byte data): {}. Proceeding to other formats...", e);
+                        // Fall through to try other decoding methods
+                    }
+                }
+            // --- Attempt 2: Check if the decoded bytes look like *just* the raw Ed25519 secret key (32 bytes) ---
+            } else if key_bytes.len() == 32 {
+                info!("Decoded base64 data is 32 bytes long. Attempting to load as raw Ed25519 secret key.");
+                let mut secret_bytes_array: [u8; 32] = key_bytes.as_slice().try_into()
+                    .map_err(|_| "Internal error: Failed to convert 32-byte Vec<u8> to [u8; 32]".to_string())?;
+
+                match Keypair::ed25519_from_bytes(&mut secret_bytes_array) {
+                    Ok(keypair) => {
+                        info!("Successfully loaded Ed25519 identity from CLEF_PRIVEE_RELAI (raw 32 secret bytes format).");
                         return Ok(keypair); // Success! Return early.
                     }
                     Err(e) => {
                         warn!("Failed to create Ed25519 keypair from 32-byte raw data: {}. Proceeding to other formats...", e);
-                        // Fall through to try other decoding methods
+                        // Fall through
                     }
                 }
             } else {
-                info!("Decoded base64 data is {} bytes long. Not treating as raw Ed25519 secret. Trying protobuf formats...", key_bytes.len());
+                info!("Decoded base64 data is {} bytes long. Not treating as raw Ed25519 secret (32 or 64 bytes). Trying protobuf formats...", key_bytes.len());
             }
 
-            // --- Attempt 2: Decode using standard libp2p Keypair protobuf encoding ---
+            // --- Attempt 3: Decode using standard libp2p Keypair protobuf encoding ---
             match Keypair::from_protobuf_encoding(&key_bytes) {
                 Ok(keypair) => {
                     info!("Successfully loaded identity from CLEF_PRIVEE_RELAI (standard libp2p protobuf format).");
@@ -406,8 +421,8 @@ fn load_keypair_from_env() -> Result<Keypair, Box<dyn Error>> {
                             }
                         }
                         Err(custom_decode_err) => {
-                            // All decoding attempts failed
-                            Err(format!("Failed to decode CLEF_PRIVEE_RELAI: Not valid raw 32-byte Ed25519, Standard proto decode error: '{}', Custom proto decode error: '{}'", libp2p_decode_err, custom_decode_err).into())
+                            // All decoding attempts failed (raw 64, raw 32, standard proto, custom proto)
+                            Err(format!("Failed to decode CLEF_PRIVEE_RELAI: Not valid raw 64-byte JS format, not valid raw 32-byte secret, Standard proto decode error: '{}', Custom proto decode error: '{}'", libp2p_decode_err, custom_decode_err).into())
                         }
                     }
                 }
