@@ -1411,24 +1411,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         );
                                         // --- END TEMP DEBUG ---
 
-                                        // Check if this is a peer discovery message
-                                        if message.topic.as_str() == peer_disc_topic.hash().as_str() ||
-                                           message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
-                                           message.topic.as_str() == orbiter_content_topic.hash().as_str() {
-                                            info!("Received peer discovery message from {:?} on topic {}", message.source, message.topic);
-                                            
-                                            // For Orbiter messages, add extra logging of the content
-                                            if message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
-                                               message.topic.as_str() == orbiter_content_topic.hash().as_str() {
-                                                info!("ORBITER MESSAGE CONTENT: {}", String::from_utf8_lossy(&message.data));
-                                            }
-                                            
+                                        // Check if this is a peer discovery message by comparing the topic string
+                                        let received_topic_str = message.topic.to_string();
+                                        if received_topic_str == CONSTELLATION_PEER_DISCOVERY_TOPIC ||
+                                           received_topic_str == ORBITER_DEVICE_DISCOVERY_TOPIC ||
+                                           received_topic_str == ORBITER_CONTENT_DISCOVERY_TOPIC {
+
+                                            info!("Received peer discovery message from {:?} on topic {}", message.source, received_topic_str);
+
                                             // Log raw content specifically for Orbiter discovery topics
-                                            if message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
-                                               message.topic.as_str() == orbiter_content_topic.hash().as_str() {
+                                            if received_topic_str == ORBITER_DEVICE_DISCOVERY_TOPIC ||
+                                               received_topic_str == ORBITER_CONTENT_DISCOVERY_TOPIC {
                                                 info!(
                                                     "ORBITER DISCOVERY MESSAGE RAW CONTENT ({} bytes) on topic {}: {}",
-                                                    message.data.len(), message.topic, String::from_utf8_lossy(&message.data)
+                                                    message.data.len(), received_topic_str, String::from_utf8_lossy(&message.data)
                                                 );
                                             }
                                             
