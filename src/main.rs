@@ -1106,8 +1106,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         info!("No valid bootstrap peers to dial.");
     }
-    // Add WebRTC listen address if not added already
-    // swarm.listen_on("/ip4/0.0.0.0/udp/0/webrtc-direct".parse()?)?; // Example, adjust as needed
+    swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1/webtransport".parse()?)?;
 
     // Clone Arc for the web server task
     let server_listening_addresses = listening_addresses.clone();
