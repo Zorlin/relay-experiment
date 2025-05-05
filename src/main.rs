@@ -261,16 +261,15 @@ fn load_keypair_from_env() -> Keypair {
     match env::var("CLEF_PRIVEE_RELAI") {
         Ok(key_b64) => {
             match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
-                Ok(mut key_bytes) => { // Make key_bytes mutable
-                    // Attempt to load as ed25519 raw secret key bytes
-                    match Keypair::ed25519_from_bytes(&mut key_bytes) {
+                Ok(key_bytes) => { // key_bytes no longer needs to be mutable
+                    // Attempt to load using protobuf encoding
+                    match Keypair::from_protobuf_encoding(&key_bytes) {
                         Ok(kp) => {
-                            info!("Loaded ed25519 identity from CLEF_PRIVEE_RELAI (raw bytes).");
+                            info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf).");
                             kp
                         },
                         Err(e) => {
-                            // Provide a more specific warning
-                            warn!("Failed to create ed25519 keypair from decoded CLEF_PRIVEE_RELAI bytes: {}. Generating random identity.", e);
+                            warn!("Failed to decode CLEF_PRIVEE_RELAI (protobuf): {}. Generating random identity.", e);
                             Keypair::generate_ed25519()
                         }
                     }
