@@ -535,7 +535,9 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         "/libp2p-relay-rust/0.1.0".to_string(),
         local_key.public(),
     )
-    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
+    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")))
+    // Explicitly set a longer identify push interval (default is 5 mins)
+    .with_interval(Duration::from_secs(600)); // 10 minutes
 
     // Build the transport
     let transport = {
