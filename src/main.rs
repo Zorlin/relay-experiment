@@ -237,6 +237,35 @@ impl From<GossipsubEvent> for RelayEvent {
 // Type alias for the shared state of listening addresses
 type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
 
+fn load_keypair_from_env() -> Keypair {
+    match env::var("CLEF_PRIVEE_RELAI") {
+        Ok(key_b64) => {
+            match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
+                Ok(key_bytes) => {
+                    match Keypair::from_protobuf_encoding(&key_bytes) {
+                        Ok(kp) => {
+                            info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf raw).");
+                            kp
+                        },
+                        Err(e) => {
+                            warn!("Failed to decode CLEF_PRIVEE_RELAI (protobuf raw): {}. Generating random identity.", e);
+                            Keypair::generate_ed25519()
+                        }
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}. Generating random identity.", e);
+                    Keypair::generate_ed25519()
+                }
+            }
+        },
+        Err(_) => {
+            info!("CLEF_PRIVEE_RELAI not set. Generating random identity.");
+            Keypair::generate_ed25519()
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Load environment variables from .env file, ignore errors (e.g., file not found)
@@ -246,7 +275,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Starting Rust libp2p relay node...");
 
     // --- Configuration Loading ---
-    let private_key_base64 = env::var("CLEF_PRIVEE_RELAI");
     let domain_name = env::var("DOMAINE").ok(); // Optional domain name
     let pubsub_topics = env::var("RELAY_PUBSUB_PEER_DISCOVERY_TOPICS").ok(); // Optional pubsub topics
 
@@ -267,32 +295,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listening_addresses: ListeningAddresses = Arc::new(Mutex::new(Vec::new()));
 
     // Create keypair for the node's identity
-    let local_key = match private_key_base64 {
-        Ok(key_b64) => {
-            match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
-                Ok(key_bytes) => {
-                    match Keypair::from_protobuf_encoding(&key_bytes) {
-                        Ok(keypair) => {
-                            info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf raw).");
-                            keypair
-                        },
-                        Err(e) => {
-                            warn!("Failed to decode CLEF_PRIVEE_RELAI as protobuf raw: {}. Generating random identity.", e);
-                            Keypair::generate_ed25519()
-                        }
-                    }
-                },
-                Err(e) => {
-                    warn!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}. Generating random identity.", e);
-                    Keypair::generate_ed25519()
-                }
-            }
-        },
-        Err(_) => {
-            info!("CLEF_PRIVEE_RELAI not set. Generating random identity.");
-            Keypair::generate_ed25519()
-        }
-    };
+    let local_key = load_keypair_from_env();
 
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
