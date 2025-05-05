@@ -17,6 +17,7 @@ use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
+use libp2p::gossipsub::{Gossipsub, GossipsubConfig, MessageAuthenticity, IdentTopic, GossipsubEvent}; // Added PubSub imports
 
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
@@ -28,6 +29,7 @@ struct RelayBehaviour {
     relay: relay::Behaviour,
     ping: ping::Behaviour,
     identify: identify::Behaviour,
+    pubsub: Gossipsub, // Added gossipsub behaviour
 }
 
 // Define the custom event type that the behaviour emits to the Swarm.
@@ -38,6 +40,7 @@ enum RelayEvent {
     Ping(ping::Event),
     Identify(identify::Event),
     Relay(relay::Event), // Added Relay variant
+    Pubsub(GossipsubEvent), // Added PubSub variant
 }
 
 // From implementations are needed for all variants the derive macro maps.
@@ -204,6 +207,12 @@ impl From<identify::Event> for RelayEvent {
     }
 }
 
+impl From<GossipsubEvent> for RelayEvent {
+    fn from(event: GossipsubEvent) -> Self {
+        RelayEvent::Pubsub(event)
+    }
+}
+
 
 // Type alias for the shared state of listening addresses
 type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
@@ -326,11 +335,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create the behaviour
     let behaviour = {
-        // We use local_peer_id and identify_config captured from the outer scope.
+        // Initialize Gossipsub for PubSub peer discovery
+        let mut gossipsub = Gossipsub::new(
+            MessageAuthenticity::Signed(local_key.clone()),
+            GossipsubConfig::default(),
+        ).unwrap();
+        if let Some(topics_str) = &pubsub_topics {
+            for name in topics_str.split(',') {
+                let topic = IdentTopic::new(name.trim());
+                let _ = gossipsub.subscribe(&topic);
+            }
+        }
         RelayBehaviour {
            relay: relay::Behaviour::new(local_peer_id, Default::default()),
            ping: ping::Behaviour::new(ping::Config::new()),
            identify: identify::Behaviour::new(identify_config), // Use identify_config directly
+           pubsub: gossipsub, // Added pubsub
        }
     };
 
