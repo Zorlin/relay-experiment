@@ -1624,6 +1624,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         } else {
                             error!("Failed to serialize peer discovery info to JSON");
                         }
+                    } else {
+                        // Log why we skipped publishing
+                        info!(
+                            "Skipping peer discovery publish: connected peers ({}) <= mesh_n_low ({})",
+                            connected_peers.len(), mesh_n_low
+                        );
                     }
                 }
             }
