@@ -594,8 +594,6 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             
             // CRITICAL: DNS resolution must happen BEFORE WebSocket layer
             // so original DNS name is preserved for TLS hostname verification
-            
-            // First, create a DNS-resolved TCP transport
             let dns_tcp = match libp2p::dns::tokio::Transport::system(tcp_transport) {
                 Ok(dns) => dns,
                 Err(e) => {
@@ -1001,25 +999,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if !bootstrap_peers.is_empty() {
         info!("Dialing {} bootstrap peers...", bootstrap_peers.len());
         
-        // Handle insecure connections if DISABLE_CERT_VERIFICATION is enabled
-        if disable_cert_verification {
-            // This environment variable is automatically picked up by rustls
-            env::set_var("RUSTLS_DANGER_DISABLE_CERTIFICATE_VERIFICATION", "1");
-            warn!("⚠️ SECURITY WARNING: Certificate verification DISABLED for bootstrap peers!");
-        }
-        
-        // Set environment variable to prefer DNS resolution over IPs for WebSockets
-        // This helps ensure proper TLS certificate validation
+        // Set environment variable to preserve DNS names for WebSockets
         env::set_var("LIBP2P_WEBSOCKET_PRESERVE_DNS", "true");
         
         for addr in bootstrap_peers {
             // Log whether the address is DNS-based or IP-based
-            if addr.to_string().contains("/dns") {
+            let uses_dns = addr.to_string().contains("/dns");
+            
+            if uses_dns {
                 info!("Dialing DNS-based bootstrap peer: {}", addr);
             } else {
                 info!("Dialing IP-based bootstrap peer: {}", addr);
             }
             
+            // For maximum connectivity, always dial using the original address format
             match swarm.dial(addr.clone()) {
                 Ok(_) => info!("Initiated dial to bootstrap peer: {}", addr),
                 Err(e) => error!("Failed to dial bootstrap peer {}: {}", addr, e),
