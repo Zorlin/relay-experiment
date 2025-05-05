@@ -573,8 +573,11 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             );
 
         dns_transport
-            .map(|either, _| match either {
-                Either::Left((peer_id, muxer)) | Either::Right((peer_id, muxer)) => (peer_id, muxer),
+            .map(|either, _| {
+                let (peer_id, muxer) = match either {
+                    Either::Left((peer_id, muxer)) | Either::Right((peer_id, muxer)) => (peer_id, muxer),
+                };
+                (peer_id, StreamMuxerBox::new(muxer))
             })
             .boxed()
     };
@@ -612,6 +615,9 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .with_idle_connection_timeout(Duration::from_secs(60))
             // Increase the limit for concurrently negotiating inbound streams significantly
             .with_max_negotiating_inbound_streams(10000)
+            // Increase connection limits from default 5 peers to 500 peers
+            .with_max_established(Some(500))
+            .with_max_established_per_peer(Some(500))
         )
         .build();
 
