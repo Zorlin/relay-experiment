@@ -571,7 +571,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     )
     .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")))
     .with_push_listen_addr_updates(true) // Enable IdentifyPush
-    .with_interval(Duration::from_secs(600));
+    .with_interval(Duration::from_secs(600))
+    .with_max_identify_message_size(1_048_576); // 1 MiB limit like TS
 
     // Note: The version of libp2p you're using might not support setting max message size directly
     // Other configurations like cache size are available but not message size limit
