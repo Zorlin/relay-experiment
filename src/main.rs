@@ -17,8 +17,8 @@ use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
-use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Topic, Event as GossipsubEvent}; // Updated PubSub imports
-use libp2p::gossipsub::topic::IdentityHash; // Specify default hasher for Topic
+use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Topic, Sha256Topic, Event as GossipsubEvent}; // Updated PubSub imports
+use libp2p::gossipsub::Sha256Topic; // Specify default hasher for Topic
 
 
 // Define the network behaviour combining multiple protocols
@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ).unwrap();
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
-                let topic = Topic::<IdentityHash>::new(name.trim());
+                let topic = Topic::<Sha256Topic>::new(name.trim());
                 let _ = gossipsub.subscribe(&topic);
             }
         }
