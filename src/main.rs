@@ -16,7 +16,7 @@ use tokio::time::interval;
 use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
-use libp2p::dns::TokioDnsConfig as TokioDnsConfig;
+use libp2p::dns::tokio::TokioDnsConfig as TokioDnsConfig;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
 use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent}; // Updated PubSub imports
 
