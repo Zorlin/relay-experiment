@@ -9,7 +9,7 @@ use libp2p::{
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
-use libp2p::connection_limits::{ConnectionLimits, TransportExt};
+use libp2p_connection_limits::{ConnectionLimits, TransportExt};
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
 use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
