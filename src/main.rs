@@ -17,7 +17,7 @@ use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
-use libp2p::gossipsub::{Gossipsub, Config, MessageAuthenticity, Topic, GossipsubEvent}; // Updated PubSub imports
+use libp2p_gossipsub::{Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Topic, GossipsubEvent}; // Updated PubSub imports
 
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
@@ -343,7 +343,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ).unwrap();
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
-                let topic = IdentTopic::new(name.trim());
+                let topic = Topic::new(name.trim());
                 let _ = gossipsub.subscribe(&topic);
             }
         }
