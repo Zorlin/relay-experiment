@@ -380,9 +380,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Listen on all interfaces for WebSocket on port 12345
     let listen_addr_ws = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
     swarm.listen_on(listen_addr_ws)?;
-    // Also listen on WebRTC multiaddr for direct peer connections
-    let webrtc_addr = format!("/webrtc/p2p/{}", local_peer_id);
-    swarm.listen_on(webrtc_addr.parse::<Multiaddr>()?)?;
+    // Also listen on WebRTC multiaddr for direct peer connections, skip if unsupported
+    let webrtc_addr_str = format!("/webrtc/p2p/{}", local_peer_id);
+    match webrtc_addr_str.parse::<Multiaddr>() {
+        Ok(addr) => {
+            swarm.listen_on(addr)?;
+        }
+        Err(e) => {
+            warn!("WebRTC multiaddr unsupported or failed to parse ({}), skipping: {}", webrtc_addr_str, e);
+        }
+    }
 
     // If a domain name is provided, also try listening on a DNS address.
     // This helps ensure the address is advertised correctly via Identify.
