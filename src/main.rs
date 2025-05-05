@@ -750,9 +750,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         info!("Connection established with: {} on {:?}", peer_id, endpoint.get_remote_address());
+                        // Log connected peers count immediately after establishment
+                        let connected_peers_count = swarm.connected_peers().count();
+                        info!("Connected peers count after establishment: {}", connected_peers_count);
                     }
                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                         info!("Connection closed with: {}. Reason: {:?}", peer_id, cause);
+                        // Log connected peers count immediately after closure
+                        let connected_peers_count = swarm.connected_peers().count();
+                        info!("Connected peers count after closure: {}", connected_peers_count);
                     }
                     // Added `..` to ignore unmentioned fields like connection_id
                     SwarmEvent::IncomingConnection { local_addr, send_back_addr, .. } => {
