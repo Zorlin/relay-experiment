@@ -384,7 +384,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let webrtc_addr_str = format!("/webrtc/p2p/{}", local_peer_id);
     match webrtc_addr_str.parse::<Multiaddr>() {
         Ok(addr) => {
-            swarm.listen_on(addr)?;
+            if let Err(e_transport) = swarm.listen_on(addr) {
+                warn!("WebRTC multiaddr unsupported or failed to listen ({}), skipping: {}", webrtc_addr_str, e_transport);
+            }
         }
         Err(e) => {
             warn!("WebRTC multiaddr unsupported or failed to parse ({}), skipping: {}", webrtc_addr_str, e);
