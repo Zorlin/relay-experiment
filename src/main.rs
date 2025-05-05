@@ -161,9 +161,7 @@ mod tests {
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
            pubsub: Gossipsub::new(
                MessageAuthenticity::Anonymous,
-               GossipsubConfigBuilder::from(GossipsubConfig::default())
-                   .validation_mode(libp2p::gossipsub::ValidationMode::Permissive)
-                   .build().expect("Failed to build GossipsubConfig")
+               GossipsubConfig::default()
            ).unwrap(),
        };
 
@@ -333,7 +331,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Wrap with DNS resolver and normalize output to (PeerId, StreamMuxerBox)
         {
             // Wrap with DNS resolver to support /dns4 and /dns6
-            let dns = TokioDnsTransport::new(tcp_or_ws_transport);
+            let dns = TokioDnsTransport::system(tcp_or_ws_transport)?;
             dns.map(|either, _endpoint| {
                 match either {
                     Either::Left((peer_id, muxer)) |
