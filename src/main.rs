@@ -5,7 +5,8 @@ use libp2p::{
     identity::{Keypair},
     noise, ping, relay, identify, autonat, dcutr,
     swarm::{NetworkBehaviour, SwarmEvent},
-    Multiaddr, PeerId, SwarmBuilder, // Removed top-level Transport trait import
+    Multiaddr, PeerId, SwarmBuilder, StreamProtocol, // Add StreamProtocol
+    // Removed top-level Transport trait import
 };
 use std::{env, error::Error, time::Duration, str::FromStr};
 use std::collections::{HashMap, HashSet};
@@ -658,6 +659,10 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let webtransport_config = WebTransportConfig::new(&local_key);
         let webtransport = WebTransport::new(webtransport_config);
 
+        // Add special protocol support for Orbiter
+        let riffcc_protocol = StreamProtocol::new(RIFFCC_PROTOCOL);
+        info!("Adding support for Orbiter protocol: {}", RIFFCC_PROTOCOL);
+
         // Combine transports
         let combined_transport = tcp_transport
             .or_transport(ws_transport)
@@ -851,6 +856,12 @@ async fn test_dns_relay_connection(hostname: &str) -> Result<(), Box<dyn Error>>
         Err(error_msg.into())
     }
 }
+
+// Define constants for Orbiter-related topics and protocols
+const RIFFCC_PROTOCOL: &str = "/riffcc/1.0.0";
+const ORBITER_DEVICE_DISCOVERY_TOPIC: &str = "orbiter._peer-discovery._p2p._pubsub";
+const ORBITER_CONTENT_DISCOVERY_TOPIC: &str = "orbiter._content-discovery._p2p._pubsub";
+const CONSTELLATION_PEER_DISCOVERY_TOPIC: &str = "constellation._peer-discovery._p2p._pubsub";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -1075,10 +1086,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let server_listening_addresses = listening_addresses.clone();
 
     // Set up peer discovery via PubSub for constellation peers
-    let peer_disc_topic = Sha256Topic::new("constellation._peer-discovery._p2p._pubsub");
+    let peer_disc_topic = Sha256Topic::new(CONSTELLATION_PEER_DISCOVERY_TOPIC);
     info!("Peer {} subscribed to topic: {}", local_peer_id, peer_disc_topic);
     swarm.behaviour_mut().pubsub.subscribe(&peer_disc_topic).expect("Failed to subscribe to peer discovery topic");
     
+    // Also subscribe to Orbiter-specific discovery topics
+    let orbiter_disc_topic = Sha256Topic::new(ORBITER_DEVICE_DISCOVERY_TOPIC);
+    info!("Peer {} subscribed to Orbiter device discovery topic: {}", local_peer_id, orbiter_disc_topic);
+    swarm.behaviour_mut().pubsub.subscribe(&orbiter_disc_topic).expect("Failed to subscribe to Orbiter device discovery topic");
+    
+    let orbiter_content_topic = Sha256Topic::new(ORBITER_CONTENT_DISCOVERY_TOPIC);
+    info!("Peer {} subscribed to Orbiter content discovery topic: {}", local_peer_id, orbiter_content_topic);
+    swarm.behaviour_mut().pubsub.subscribe(&orbiter_content_topic).expect("Failed to subscribe to Orbiter content discovery topic");
+
     // Track last time we published peer info
     let mut last_peer_discovery = std::time::Instant::now();
     let peer_discovery_interval = Duration::from_secs(60); // Publish every minute
@@ -1271,8 +1291,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         info!("Received PubSub message: {:?}, Topic={}, Data size={}", message.source, message.topic, message.data.len());
                                         
                                         // Check if this is a peer discovery message
-                                        if message.topic.as_str() == peer_disc_topic.hash().as_str() {
-                                            info!("Received peer discovery message from {:?}", message.source);
+                                        if message.topic.as_str() == peer_disc_topic.hash().as_str() ||
+                                           message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
+                                           message.topic.as_str() == orbiter_content_topic.hash().as_str() {
+                                            info!("Received peer discovery message from {:?} on topic {}", message.source, message.topic);
+                                            
+                                            // For Orbiter messages, add extra logging of the content
+                                            if message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
+                                               message.topic.as_str() == orbiter_content_topic.hash().as_str() {
+                                                info!("ORBITER MESSAGE CONTENT: {}", String::from_utf8_lossy(&message.data));
+                                            }
                                             
                                             // Try to parse peer information
                                             if let Ok(peers_info) = serde_json::from_slice::<Vec<SerializablePeer>>(&message.data) {
