@@ -58,6 +58,8 @@ impl From<relay::Event> for RelayEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::STANDARD as base64_engine;
+    use base64::Engine;
     // Removed duplicate super import
     use libp2p::{
         ping, identify, // Removed relay import as it's not used directly in tests now
@@ -200,6 +202,16 @@ mod tests {
        // assert_eq!(config.initial_delay, Duration::from_millis(500));
        // Check default interval instead (adjust if libp2p defaults change)
        assert_eq!(config.interval(), Duration::from_secs(5 * 60));
+   }
+
+   #[test]
+   fn test_clef_privée_relai_env_key_decoding() {
+       // Test base64 decoding of CLEF_PRIVEE_RELAI env var
+       let sample = "YWJjZGVm"; // base64 for "abcdef"
+       std::env::set_var("CLEF_PRIVEE_RELAI", sample);
+       let key_b64 = std::env::var("CLEF_PRIVEE_RELAI").unwrap();
+       let decoded = base64_engine.decode(key_b64.as_bytes()).unwrap();
+       assert_eq!(decoded, b"abcdef");
    }
 }
 
