@@ -19,7 +19,16 @@ warp = "0.3" # Added warp for the web server
 serde = { version = "1.0", features = ["derive"] } # Added serde for JSON serialization
 serde_json = "1.0" # Added serde_json
 parking_lot = "0.12" # Added for Mutex, often preferred with async
+bytes = "1" # Added bytes crate dependency for prost
+
+# Add prost for protobuf handling
+prost = "0.13"
+
+[build-dependencies]
+# Add build dependency for prost
+prost-build = "0.13"
 
 [dev-dependencies]
 ed25519-dalek = "2.1.1" # For generating test keys
 rand = "0.8.5"          # For generating test keys
+prost-types = "0.13" # Add prost-types for test encoding
