@@ -204,31 +204,29 @@ mod tests {
        assert_eq!(config.interval(), Duration::from_secs(5 * 60));
    }
 
-   use ed25519_dalek::SigningKey; // Import SigningKey
-   use rand::rngs::OsRng; // Import OsRng for key generation
+   // Removed unused ed25519_dalek and rand imports for this specific test
 
    #[test]
-   fn test_clef_privée_relai_env_key_loading() {
-       // Generate a valid ed25519 secret key
-       let mut csprng = OsRng;
-       let signing_key = SigningKey::generate(&mut csprng);
-       let secret_bytes: [u8; 32] = signing_key.to_bytes();
+   fn test_clef_privée_relai_env_key_loading_protobuf() {
+       // Generate a standard libp2p Ed25519 keypair
+       let original_keypair = Keypair::generate_ed25519();
+       let expected_public_key = original_keypair.public();
 
-       // Base64 encode the raw secret bytes
-       let key_b64 = base64_engine.encode(&secret_bytes);
+       // Encode the keypair to its protobuf representation
+       let protobuf_bytes = original_keypair.to_protobuf_encoding().expect("Failed to encode keypair to protobuf");
+
+       // Base64 encode the protobuf bytes
+       let key_b64 = base64_engine.encode(&protobuf_bytes);
        std::env::set_var("CLEF_PRIVEE_RELAI", &key_b64);
 
-       // Simulate loading the keypair using the function under test
-       // (We don't call load_keypair_from_env directly to isolate the test logic,
-       // but we replicate its core key generation part)
-       let loaded_key_b64 = std::env::var("CLEF_PRIVEE_RELAI").unwrap();
-       let mut decoded_bytes = base64_engine.decode(loaded_key_b64.as_bytes()).expect("Base64 decoding failed");
+       // --- Actually call the function under test ---
+       let loaded_keypair = load_keypair_from_env();
 
-       // Attempt to create the keypair from the decoded bytes
-       let keypair_result = Keypair::ed25519_from_bytes(&mut decoded_bytes);
+       // Assert that the loaded keypair's public key matches the original one
+       assert_eq!(loaded_keypair.public(), expected_public_key, "Loaded keypair public key does not match the original");
 
-       // Assert that keypair creation was successful
-       assert!(keypair_result.is_ok(), "Failed to create keypair from decoded bytes: {:?}", keypair_result.err());
+       // Optional: Assert the PeerIds match as well (derived from public key)
+       assert_eq!(PeerId::from(loaded_keypair.public()), PeerId::from(expected_public_key), "Loaded PeerId does not match the original");
 
        // Clean up environment variable
        std::env::remove_var("CLEF_PRIVEE_RELAI");
