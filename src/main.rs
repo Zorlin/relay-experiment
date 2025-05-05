@@ -16,7 +16,7 @@ use tokio::time::interval;
 use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
-use libp2p::dns::tokio::Transport as TokioDnsTransport;
+use libp2p::dns::DnsConfig;
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
 use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent}; // Updated PubSub imports
 
@@ -329,18 +329,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Combine TCP and WS transports
         let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
 
-        // Wrap with DNS resolver and normalize output to (PeerId, StreamMuxerBox)
-        {
-            // Wrap with DNS resolver to support /dns4 and /dns6
-            let dns = TokioDnsTransport::system(tcp_or_ws_transport)?;
-            dns.map(|either, _endpoint| {
-                match either {
-                    Either::Left((peer_id, muxer)) |
-                    Either::Right((peer_id, muxer)) => (peer_id, muxer),
-                }
-            })
-            .boxed()
-        }
+        // Wrap with DNS resolver to support /dns4 and /dns6
+        let dns = DnsConfig::system(tcp_or_ws_transport)?;
+        dns.boxed()
     };
 
     // Create the behaviour
