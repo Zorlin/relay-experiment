@@ -17,7 +17,7 @@ use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
-use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Event as GossipsubEvent}; // Updated PubSub imports
+use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Sha256Hash, Event as GossipsubEvent}; // Updated PubSub imports
 use libp2p::gossipsub::TopicHash; // gossipsub TopicHash type
 
 
@@ -189,7 +189,7 @@ mod tests {
 
        assert_eq!(config.protocol_version(), protocol_version);
        // Field name changed from public_key to local_public_key
-       assert_eq!(config.local_public_key(), public_key);
+       assert_eq!(config.local_public_key(), &public_key);
        assert_eq!(config.agent_version(), agent_version);
        // initial_delay field removed or changed, remove assertion
        // assert_eq!(config.initial_delay, Duration::from_millis(500));
@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ).unwrap();
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
-                let topic = TopicHash::from_raw(name.trim());
+                let topic = Topic::<Sha256Hash>::new(name.trim());
                 let _ = gossipsub.subscribe(&topic);
             }
         }
