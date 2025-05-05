@@ -6,7 +6,10 @@ description = "A libp2p relay implementation in Rust"
 license = "MIT" # Or your preferred license
 
 [dependencies]
-libp2p = { version = "0.55", features = ["tokio", "tcp", "identify", "ping", "relay", "macros", "noise", "yamux", "dns", "websocket", "gossipsub", "autonat", "dcutr"] } # Base libp2p features
+libp2p = { version = "0.55", features = [
+    "tokio", "tcp", "identify", "ping", "relay", "macros", "noise", "yamux", "dns", "websocket", "gossipsub", "autonat", "dcutr",
+    "quic"
+] } # Base libp2p features
 libp2p-websocket = { version = "0.45" } # Removed non-existent "tokio" feature
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"

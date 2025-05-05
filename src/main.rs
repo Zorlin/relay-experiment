@@ -6,6 +6,7 @@ use libp2p::{
     noise, ping, relay, identify, autonat, dcutr,
     swarm::{NetworkBehaviour, SwarmEvent},
     Multiaddr, PeerId, SwarmBuilder, StreamProtocol, // Add StreamProtocol
+    quic, // <-- Import the quic module
     // Removed top-level Transport trait import
 };
 use std::{env, error::Error, time::Duration, str::FromStr};
@@ -621,6 +622,10 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .timeout(Duration::from_secs(20))
             .boxed();
 
+        // QUIC Transport
+        // Note: libp2p::quic::tokio::Transport is the specific type for Tokio
+        let quic_transport = quic::tokio::Transport::new(quic::Config::new(&local_key));
+
         // WebSocket Transport - configure with proper DNS handling
         let ws_transport = {
             // First create a TCP transport
@@ -665,13 +670,16 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
         // Combine transports
         let combined_transport = tcp_transport
+            .or_transport(quic_transport) // Add QUIC transport here
             .or_transport(ws_transport)
             .or_transport(webrtc_transport)
             .or_transport(webtransport)
             .map(|either_output, _| {
                 // Map the output of the combined transports to (PeerId, StreamMuxerBox)
                 match either_output {
-                    Either::Left(Either::Left(Either::Left(tcp_conn))) => tcp_conn,
+                    // Adjust matching for the added QUIC layer (now 5 levels deep)
+                    Either::Left(Either::Left(Either::Left(Either::Left(tcp_conn)))) => tcp_conn,
+                    Either::Left(Either::Left(Either::Left(Either::Right(quic_conn)))) => (quic_conn.0, StreamMuxerBox::new(quic_conn.1)),
                     Either::Left(Either::Left(Either::Right(ws_conn))) => ws_conn,
                     Either::Left(Either::Right(webrtc_conn)) => (webrtc_conn.0, StreamMuxerBox::new(webrtc_conn.1)),
                     // Map WebTransport connection to StreamMuxerBox
@@ -1007,15 +1015,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => warn!("Failed to listen on WebRTC-direct: {}", e),
     }
     
-    // Replace ephemeral UDP ports with 443 for QUIC and WebTransport
+    // Listen on QUIC v1 on UDP/443
     match swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1".parse()?) {
         Ok(listener_id) => info!("Listening on QUIC v1 (UDP/443) with listener ID: {:?}", listener_id),
         Err(e) => warn!("Failed to listen on QUIC v1 (UDP/443): {}", e),
     }
 
+    // Listen on WebTransport on UDP/443
     match swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1/webtransport".parse()?) {
         Ok(listener_id) => info!("Listening on WebTransport (UDP/443) with listener ID: {:?}", listener_id),
         Err(e) => warn!("Failed to listen on WebTransport (UDP/443): {}", e),
+    }
+
+    // Also listen on generic shorthand transports (like JS defaults)
+    match swarm.listen_on("/webrtc".parse()?) {
+        Ok(listener_id) => info!("Listening on /webrtc with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on /webrtc: {}", e),
+    }
+    match swarm.listen_on("/webtransport".parse()?) {
+        Ok(listener_id) => info!("Listening on /webtransport with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on /webtransport: {}", e),
+    }
+    match swarm.listen_on("/p2p-circuit".parse()?) {
+        Ok(listener_id) => info!("Listening on /p2p-circuit with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on /p2p-circuit: {}", e),
     }
 
     // If a domain name is provided, add external addresses for Nginx proxying
