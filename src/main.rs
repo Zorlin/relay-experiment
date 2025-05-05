@@ -17,7 +17,6 @@ use tokio::time::interval;
 use log::{info, error, warn, LevelFilter};
 use warp::Filter;
 use dotenvy::dotenv;
-use libp2p::dns::tokio::Transport as TokioDnsConfig;
 use libp2p::core::muxing::StreamMuxerBox;
 use base64::{engine::general_purpose::{STANDARD as base64_engine, STANDARD_NO_PAD}, Engine as _};
 use libp2p::gossipsub::{Behaviour as Gossipsub, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent, ValidationMode};
@@ -585,25 +584,34 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .timeout(Duration::from_secs(20))
             .boxed();
 
-        // WebSocket Transport - configure for testing with certificate verification disabled
+        // WebSocket Transport - configure with proper DNS handling
         let ws_transport = {
-            // Set environment variable to disable certificate verification if needed
-            // This will affect all TLS connections, not just WebSockets!
-            if env::var("DISABLE_CERT_VERIFICATION").unwrap_or_default() == "true" {
-                warn!("Using insecure WebSocket transport with certificate verification disabled!");
-            }
+            // First create a TCP transport
+            let tcp_transport = libp2p::tcp::tokio::Transport::new(
+                libp2p::tcp::Config::default()
+                    .nodelay(true)
+            );
             
-            // Create the transport with default settings
-            let ws_transport = libp2p::websocket::WsConfig::new(
-                    libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
-                )
+            // CRITICAL: DNS resolution must happen BEFORE WebSocket layer
+            // so original DNS name is preserved for TLS hostname verification
+            
+            // First, create a DNS-resolved TCP transport
+            let dns_tcp = match libp2p::dns::tokio::Transport::system(tcp_transport) {
+                Ok(dns) => dns,
+                Err(e) => {
+                    error!("Failed to create DNS resolver for TCP: {}", e);
+                    return Err(e.into());
+                }
+            };
+            
+            // Then wrap it with WebSocket 
+            // Now DNS->TCP->WS ensures hostname is preserved for TLS validation
+            libp2p::websocket::WsConfig::new(dns_tcp)
                 .upgrade(Version::V1Lazy)
                 .authenticate(noise::Config::new(&local_key)?)
                 .multiplex(libp2p::yamux::Config::default())
                 .timeout(Duration::from_secs(20))
-                .boxed();
-            
-            ws_transport
+                .boxed()
         };
 
         // WebRTC Transport
@@ -633,12 +641,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             })
             .boxed();
 
-        // Wrap with DNS resolver
-        // Note: There may be issues with WSS certificate verification when connecting to DNS addresses.
-        // For a production deployment, you may need a custom TLS verifier that properly handles
-        // domain name verification or use a proxy to handle the WSS connections.
-        TokioDnsConfig::system(combined_transport)?
-            .boxed()
+        // No need for a final DNS layer - it's already included in the individual transports
+        combined_transport
     };
 
     // Create the behaviour
@@ -712,6 +716,90 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     Ok(swarm)
 }
 
+// Function to test connection to a specific relay hostname
+async fn test_dns_relay_connection(hostname: &str) -> Result<(), Box<dyn Error>> {
+    info!("Testing connection to relay at {}", hostname);
+    
+    // Make sure we have a domain set in the environment
+    if env::var("DOMAINE").is_err() {
+        info!("Setting DOMAINE to {} for this test", hostname);
+        env::set_var("DOMAINE", hostname);
+    }
+    
+    // Generate a new key for this test
+    let local_key = Keypair::generate_ed25519();
+    let local_peer_id = PeerId::from(local_key.public());
+    info!("Test client peer ID: {}", local_peer_id);
+    
+    // Build a minimal swarm focused on just the connection test
+    let mut swarm = build_swarm(local_key, None).await?;
+    
+    // CRITICAL: Create relay address explicitly using dns4 protocol
+    // This ensures DNS lookup happens at the TLS layer rather than at IP layer
+    let relay_addr = format!("/dns4/{}/tcp/443/wss", hostname).parse::<Multiaddr>()?;
+    info!("Attempting to connect to {}", relay_addr);
+    
+    // IMPORTANT: Set external address for ourselves with the DNS name too
+    let our_external_addr = format!("/dns4/{}/tcp/443/wss/p2p/{}", hostname, swarm.local_peer_id()).parse::<Multiaddr>()?;
+    swarm.add_external_address(our_external_addr.clone());
+    info!("Added external address with domain: {}", our_external_addr);
+    
+    // Attempt the connection
+    match swarm.dial(relay_addr.clone()) {
+        Ok(_) => info!("Initiated connection to {}", relay_addr),
+        Err(e) => {
+            error!("Failed to dial {}: {}", relay_addr, e);
+            return Err(e.into());
+        }
+    }
+    
+    // Check for successful connection
+    let mut connected = false;
+    let mut timeout = tokio::time::interval(Duration::from_secs(1));
+    let start_time = std::time::Instant::now();
+    let timeout_duration = Duration::from_secs(10);
+    
+    while !connected && start_time.elapsed() < timeout_duration {
+        tokio::select! {
+            _ = timeout.tick() => {
+                // Check if we're connected to any peers
+                let connected_peer_count = swarm.connected_peers().count();
+                if connected_peer_count > 0 {
+                    info!("Connected to {} peers", connected_peer_count);
+                    connected = true;
+                    break;
+                }
+            },
+            event = swarm.select_next_some() => {
+                match event {
+                    SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+                        info!("Successfully connected to {}", peer_id);
+                        connected = true;
+                    },
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        // Log the full error for better debugging
+                        error!("Connection error to {:?}: {}", peer_id, error);
+                        if error.to_string().contains("certificate") {
+                            error!("TLS certificate validation error - this indicates the hostname isn't being preserved");
+                        }
+                        return Err(format!("Connection error: {}", error).into());
+                    },
+                    _ => {}
+                }
+            }
+        }
+    }
+    
+    if connected {
+        info!("✅ Successfully connected to relay at {}", hostname);
+        Ok(())
+    } else {
+        let error_msg = format!("❌ Failed to connect to relay at {} within {} seconds", 
+                               hostname, timeout_duration.as_secs());
+        error!("{}", error_msg);
+        Err(error_msg.into())
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -723,6 +811,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let disable_cert_verification = env::var("DISABLE_CERT_VERIFICATION")
         .map(|val| val.to_lowercase() == "true")
         .unwrap_or(false);
+    
+    // Check if we're just testing a connection to a specific relay
+    let test_relay = env::var("TEST_RELAY").ok();
+    if let Some(hostname) = test_relay {
+        info!("Running in relay test mode for hostname: {}", hostname);
+        return test_dns_relay_connection(&hostname).await;
+    }
     
     if disable_cert_verification {
         warn!("⚠️ SECURITY WARNING: Certificate verification is DISABLED. This is insecure and should only be used for development/testing!");
@@ -824,10 +919,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => warn!("Failed to listen on WebRTC: {}", e),
     }
     
-    // Also add explicit WebRTC address for our peer ID (helps with discovery)
-    let webrtc_addr: Multiaddr = format!("/webrtc/p2p/{}", local_peer_id).parse()?;
-    swarm.add_external_address(webrtc_addr.clone());
-    info!("Added external WebRTC address: {}", webrtc_addr);
+    // Only add explicit WebRTC IP-based address when no domain is provided
+    if domain_name.is_none() {
+        // Add explicit WebRTC address for our peer ID (helps with discovery)
+        let webrtc_addr: Multiaddr = format!("/webrtc/p2p/{}", local_peer_id).parse()?;
+        swarm.add_external_address(webrtc_addr.clone());
+        info!("Added external WebRTC address: {}", webrtc_addr);
+    }
 
     // If a domain name is provided, add external addresses for Nginx proxying
     if let Some(domain) = &domain_name {
@@ -856,6 +954,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 error!("Failed to parse WS address from domain {}: {}", domain, e);
             }
         }
+        
+        // Also add WebRTC address with domain
+        let webrtc_dns_addr = format!("/dns4/{}/webrtc/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        match webrtc_dns_addr {
+            Ok(addr) => {
+                swarm.add_external_address(addr.clone());
+                info!("Advertising WebRTC DNS address: {}", addr);
+            }
+            Err(e) => {
+                error!("Failed to parse WebRTC DNS address from domain {}: {}", domain, e);
+            }
+        }
+    } else {
+        info!("No domain name provided. Only advertising direct IP-based addresses.");
     }
 
     // Listen on WebTransport (QUIC-based, uses UDP)
@@ -896,9 +1008,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
             warn!("⚠️ SECURITY WARNING: Certificate verification DISABLED for bootstrap peers!");
         }
         
+        // Set environment variable to prefer DNS resolution over IPs for WebSockets
+        // This helps ensure proper TLS certificate validation
+        env::set_var("LIBP2P_WEBSOCKET_PRESERVE_DNS", "true");
+        
         for addr in bootstrap_peers {
+            // Log whether the address is DNS-based or IP-based
+            if addr.to_string().contains("/dns") {
+                info!("Dialing DNS-based bootstrap peer: {}", addr);
+            } else {
+                info!("Dialing IP-based bootstrap peer: {}", addr);
+            }
+            
             match swarm.dial(addr.clone()) {
-                Ok(_) => info!("Dialing bootstrap peer: {}", addr),
+                Ok(_) => info!("Initiated dial to bootstrap peer: {}", addr),
                 Err(e) => error!("Failed to dial bootstrap peer {}: {}", addr, e),
             }
         }
