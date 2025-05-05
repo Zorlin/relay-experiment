@@ -601,8 +601,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         .with_behaviour(|_| Ok(behaviour))? // Pass the built behaviour
         .with_swarm_config(|c| c
             .with_idle_connection_timeout(Duration::from_secs(60))
-            // Increase the limit for concurrently negotiating inbound streams
-            .with_max_negotiating_inbound_streams(100)
+            // Increase the limit for concurrently negotiating inbound streams significantly
+            .with_max_negotiating_inbound_streams(10000)
         )
         .build();
 
