@@ -1,11 +1,11 @@
 use futures::stream::StreamExt;
 // Removed duplicate import
 use libp2p::{
-    core::upgrade,
+    // Removed unused core::upgrade
     identity,
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, Multiaddr, PeerId, Transport, SwarmBuilder,
+    tcp, Multiaddr, PeerId, SwarmBuilder, // Removed unused Transport
 };
 use std::error::Error;
 use std::time::Duration;
@@ -98,13 +98,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             // The behaviour construction might need the keypair now,
             // although our current RelayBehaviour doesn't directly use it in its constructor.
             // We pass the peer_id derived earlier.
-             // Clone identify_config as it's moved into the closure.
-             let final_identify_config = identify_config.clone();
+             // identify_config is captured by the closure now, no need to clone separately
+             // as it wasn't moved previously.
              RelayBehaviour {
                 // Use the peer_id derived from the key passed to the closure
                 relay: relay::Behaviour::new(PeerId::from(key.public()), Default::default()),
                 ping: ping::Behaviour::new(ping::Config::new()),
-                identify: identify::Behaviour::new(final_identify_config),
+                identify: identify::Behaviour::new(identify_config), // Use identify_config directly
             }
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60))) // Example config
