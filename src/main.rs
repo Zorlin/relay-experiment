@@ -311,6 +311,9 @@ mod tests {
    fn test_clef_privée_relai_env_key_loading_not_set() {
        // Ensure the environment variable is not set
        std::env::remove_var("CLEF_PRIVEE_RELAI");
+       // Add logging to confirm the variable is unset before calling the function
+       let var_check = std::env::var("CLEF_PRIVEE_RELAI");
+       println!("test_clef_privée_relai_env_key_loading_not_set: CLEF_PRIVEE_RELAI check before call: {:?}", var_check);
 
        // --- Actually call the function under test ---
        let loaded_keypair_result = load_keypair_from_env();
