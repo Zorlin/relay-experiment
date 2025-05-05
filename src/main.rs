@@ -160,10 +160,9 @@ mod tests {
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
            pubsub: Gossipsub::new(
                MessageAuthenticity::Anonymous,
-               GossipsubConfig {
-                   validation_mode: libp2p::gossipsub::ValidationMode::Permissive,
-                   ..Default::default()
-               }
+               GossipsubConfigBuilder::from(GossipsubConfig::default())
+                   .validation_mode(libp2p::gossipsub::ValidationMode::Permissive)
+                   .build()
            ).unwrap(),
        };
 
