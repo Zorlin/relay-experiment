@@ -204,14 +204,34 @@ mod tests {
        assert_eq!(config.interval(), Duration::from_secs(5 * 60));
    }
 
+   use ed25519_dalek::SigningKey; // Import SigningKey
+   use rand::rngs::OsRng; // Import OsRng for key generation
+
    #[test]
-   fn test_clef_privée_relai_env_key_decoding() {
-       // Test base64 decoding of CLEF_PRIVEE_RELAI env var
-       let sample = "YWJjZGVm"; // base64 for "abcdef"
-       std::env::set_var("CLEF_PRIVEE_RELAI", sample);
-       let key_b64 = std::env::var("CLEF_PRIVEE_RELAI").unwrap();
-       let decoded = base64_engine.decode(key_b64.as_bytes()).unwrap();
-       assert_eq!(decoded, b"abcdef");
+   fn test_clef_privée_relai_env_key_loading() {
+       // Generate a valid ed25519 secret key
+       let mut csprng = OsRng;
+       let signing_key = SigningKey::generate(&mut csprng);
+       let secret_bytes: [u8; 32] = signing_key.to_bytes();
+
+       // Base64 encode the raw secret bytes
+       let key_b64 = base64_engine.encode(&secret_bytes);
+       std::env::set_var("CLEF_PRIVEE_RELAI", &key_b64);
+
+       // Simulate loading the keypair using the function under test
+       // (We don't call load_keypair_from_env directly to isolate the test logic,
+       // but we replicate its core key generation part)
+       let loaded_key_b64 = std::env::var("CLEF_PRIVEE_RELAI").unwrap();
+       let mut decoded_bytes = base64_engine.decode(loaded_key_b64.as_bytes()).expect("Base64 decoding failed");
+
+       // Attempt to create the keypair from the decoded bytes
+       let keypair_result = Keypair::ed25519_from_bytes(&mut decoded_bytes);
+
+       // Assert that keypair creation was successful
+       assert!(keypair_result.is_ok(), "Failed to create keypair from decoded bytes: {:?}", keypair_result.err());
+
+       // Clean up environment variable
+       std::env::remove_var("CLEF_PRIVEE_RELAI");
    }
 }
 
@@ -241,14 +261,16 @@ fn load_keypair_from_env() -> Keypair {
     match env::var("CLEF_PRIVEE_RELAI") {
         Ok(key_b64) => {
             match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
-                Ok(key_bytes) => {
-                    match Keypair::from_protobuf_encoding(&key_bytes) {
+                Ok(mut key_bytes) => { // Make key_bytes mutable
+                    // Attempt to load as ed25519 raw secret key bytes
+                    match Keypair::ed25519_from_bytes(&mut key_bytes) {
                         Ok(kp) => {
-                            info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf raw).");
+                            info!("Loaded ed25519 identity from CLEF_PRIVEE_RELAI (raw bytes).");
                             kp
                         },
                         Err(e) => {
-                            warn!("Failed to decode CLEF_PRIVEE_RELAI (protobuf raw): {}. Generating random identity.", e);
+                            // Provide a more specific warning
+                            warn!("Failed to create ed25519 keypair from decoded CLEF_PRIVEE_RELAI bytes: {}. Generating random identity.", e);
                             Keypair::generate_ed25519()
                         }
                     }
@@ -516,14 +538,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                     SwarmEvent::Behaviour(RelayEvent::Relay(event)) => {
                         // Handle events emitted by the relay::Behaviour
-                        // Log when clients request or are accepted as relay
                         match event {
-                            relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
-                                info!("New relay reservation request from client: {}", src_peer_id);
+                            // Combine logging for initial acceptance and renewals
+                            relay::Event::ReservationReqAccepted { src_peer_id, renewed, .. } => {
+                                if renewed {
+                                    info!("Relay reservation renewed for client: {}", src_peer_id);
+                                } else {
+                                    info!("Client {} successfully reserved relay hop", src_peer_id);
+                                }
                             }
-                            relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
-                                info!("Client {} successfully reserved relay hop", src_peer_id);
+                            // Add other specific relay::Event variants if needed, e.g., ReservationTimedOut
+                            relay::Event::ReservationTimedOut { src_peer_id, .. } => {
+                                warn!("Relay reservation timed out for client: {}", src_peer_id);
                             }
+                            // Catch-all for other relay events
                             _ => {
                                 info!("Relay event: {:?}", event);
                             }
