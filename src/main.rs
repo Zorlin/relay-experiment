@@ -16,7 +16,7 @@ use std::fs;
 use std::io::Write;
 use parking_lot::Mutex;
 use tokio::time::interval;
-use log::{info, error, warn, LevelFilter};
+use log::{debug, info, error, warn, LevelFilter};
 use warp::Filter;
 use dotenvy::dotenv;
 use libp2p::core::muxing::StreamMuxerBox;
@@ -1375,7 +1375,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             RelayEvent::Pubsub(pubsub_event) => {
                                 match pubsub_event {
                                     GossipsubEvent::Subscribed { peer_id, topic } => {
-                                        info!("Peer {} subscribed to topic: {}", peer_id, topic);
+                                        debug!("Peer {} subscribed to topic: {}", peer_id, topic);
                                         let topic_name = topic.to_string();
 
                                         // Check if this is an Orbiter peer discovery topic
@@ -1390,11 +1390,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         if let Err(e) = swarm.behaviour_mut().pubsub.subscribe(&topic_to_subscribe) {
                                             error!("Error subscribing relay to topic {} after peer subscription: {}", topic_name, e);
                                         } else {
-                                            info!("Relay ensuring subscription to topic requested by peer: {}", topic_name);
+                                            debug!("Relay ensuring subscription to topic requested by peer: {}", topic_name);
                                         }
                                     }
                                     GossipsubEvent::Unsubscribed { peer_id, topic } => {
-                                        info!("Peer {} unsubscribed from topic: {}", peer_id, topic);
+                                        debug!("Peer {} unsubscribed from topic: {}", peer_id, topic);
                                         // REMOVED: Logic to track peer unsubscriptions and potentially unsubscribe relay
                                         // let topic_name = topic.to_string();
                                         // let topic_to_unsubscribe = Sha256Topic::new(topic_name.clone());
