@@ -1323,8 +1323,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     identify::Event::Received { peer_id, info, .. } => {
                                         info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
                                         for addr in info.listen_addrs {
-                                            swarm.add_external_address(addr.clone());
-                                            info!("Added external address from Identify: {}", addr);
+                                            // --- Sanitize Identify Addresses ---
+                                            let addr_str = addr.to_string();
+                                            // Limit length and check for excessive p2p-circuit nesting
+                                            const MAX_ADDR_LEN: usize = 256;
+                                            const MAX_CIRCUIT_DEPTH: usize = 2;
+                                            if addr_str.len() > MAX_ADDR_LEN {
+                                                warn!("Ignoring excessively long address from Identify ({} > {}): {}", addr_str.len(), MAX_ADDR_LEN, addr_str);
+                                                continue;
+                                            }
+                                            if addr_str.matches("/p2p-circuit").count() > MAX_CIRCUIT_DEPTH {
+                                                warn!("Ignoring address with excessive p2p-circuit nesting (> {}) from Identify: {}", MAX_CIRCUIT_DEPTH, addr_str);
+                                                continue;
+                                            }
+                                            // --- End Sanitize ---
+
+                                            // Check if address already exists before adding
+                                            // Note: This check might not be strictly necessary if Swarm handles duplicates, but adds clarity.
+                                            let current_addrs = swarm.external_addresses().cloned().collect::<Vec<_>>();
+                                            if !current_addrs.contains(&addr) {
+                                                swarm.add_external_address(addr.clone());
+                                                info!("Added external address from Identify: {}", addr);
+                                            } else {
+                                                // info!("Skipping duplicate external address from Identify: {}", addr);
+                                            }
                                         }
                                     }
                                     _ => info!("Other Identify event: {:?}", identify_event),
@@ -1382,7 +1404,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                     GossipsubEvent::Message { message, .. } => {
                                         info!("Received PubSub message: {:?}, Topic={}, Data size={}", message.source, message.topic, message.data.len());
-                                        
+                                        // --- TEMP DEBUG: Log ALL received messages ---
+                                        info!(
+                                            "[RAW MSG] Source: {:?}, Topic Hash: {}, Data Len: {}",
+                                            message.source, message.topic, message.data.len()
+                                        );
+                                        // --- END TEMP DEBUG ---
+
                                         // Check if this is a peer discovery message
                                         if message.topic.as_str() == peer_disc_topic.hash().as_str() ||
                                            message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
