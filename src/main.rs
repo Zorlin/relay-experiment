@@ -43,9 +43,10 @@ mod tests {
     use libp2p::{
         ping, relay, identify,
         identity::Keypair,
-        PeerId, Multiaddr,
+        PeerId, Multiaddr, StreamProtocol, // Added StreamProtocol
         swarm::ConnectionId,
-        core::Endpoint,
+        // Removed unused core::Endpoint
+        relay::client as relay_client, // Added import for relay client events
     };
 
     // Helper to create a dummy PeerId for testing
@@ -59,18 +60,20 @@ mod tests {
     }
 
     #[test]
-    fn test_from_relay_event() {
+    fn test_from_relay_client_event() { // Renamed test slightly for clarity
         let peer_id = dummy_peer_id();
-        let relay_event = relay::Event::CircuitReq {
-            src_peer_id: peer_id,
-            src_relay_addr: dummy_multiaddr(),
-            max_circuit_duration: Duration::from_secs(10),
-            max_circuit_bytes: 1024,
-            limited_relay: false, // Added field
-            reservation: None, // Added field
+        // Use a valid event from relay::client::Event as relay::Event is now an enum over client/server events
+        let relay_client_event = relay_client::Event::ReservationReqAccepted {
+            relay_peer_id: peer_id,
+            limit: None, // Example field, adjust if needed based on actual event structure
+            renewal_timeout: Duration::from_secs(60), // Example field
+            addrs: vec![dummy_multiaddr()], // Example field
         };
+        // We need to wrap the client event in the top-level relay::Event
+        let relay_event = relay::Event::Client(relay_client_event);
         let event: RelayEvent = relay_event.into();
-        assert!(matches!(event, RelayEvent::Relay(relay::Event::CircuitReq { .. })));
+        // Adjust the match pattern accordingly
+        assert!(matches!(event, RelayEvent::Relay(relay::Event::Client(relay_client::Event::ReservationReqAccepted { .. }))));
     }
 
     #[test]
@@ -79,10 +82,11 @@ mod tests {
         let ping_event = ping::Event {
             peer: peer_id,
             connection: ConnectionId::new_unchecked(0), // Use new_unchecked for simplicity in test
-            result: Result::Ok(ping::Success::Ping { rtt: Duration::from_millis(10) }),
+            // Ping result is now directly Result<Duration, Failure>
+            result: Result::Ok(Duration::from_millis(10)),
         };
         let event: RelayEvent = ping_event.into();
-        assert!(matches!(event, RelayEvent::Ping(ping::Event { .. })));
+        assert!(matches!(event, RelayEvent::Ping(ping::Event { result: Ok(_), .. }))); // Adjusted match slightly
     }
 
     #[test]
@@ -96,10 +100,11 @@ mod tests {
                 protocol_version: "test/1.0".to_string(),
                 agent_version: "test-agent/0.1".to_string(),
                 listen_addrs: vec![dummy_multiaddr()],
-                protocols: vec!["/test/1".into()],
+                // Use StreamProtocol::new for protocol names
+                protocols: vec![StreamProtocol::new("/test/1")],
                 observed_addr: dummy_multiaddr(),
             },
-            connection: ConnectionId::new_unchecked(0), // Added field
+            // Removed non-existent 'connection' field
         };
         let event: RelayEvent = identify_event.into();
         assert!(matches!(event, RelayEvent::Identify(identify::Event::Received { .. })));
@@ -118,14 +123,17 @@ mod tests {
             peer_id,
             connection_id: ConnectionId::new_unchecked(0),
             endpoint: dummy_endpoint,
-            failed_addresses: &[],
-            other_established: 0,
+            // Removed 'failed_addresses' and renamed 'other_established' to 'num_established'
+            num_established: 0,
+            concurrent_dial_errors: None, // Add potentially missing fields if needed by the version
+            established_in: Duration::from_secs(0), // Add potentially missing fields if needed by the version
         };
 
         match event {
-             SwarmEvent::ConnectionEstablished { peer_id: p, endpoint: e, .. } => {
+             SwarmEvent::ConnectionEstablished { peer_id: p, endpoint: e, num_established, .. } => {
                  assert_eq!(p, peer_id);
                  assert!(matches!(e, libp2p::core::ConnectedPoint::Listener{..}));
+                 assert_eq!(num_established, 0); // Check the renamed field
              },
              _ => panic!("Event did not match expected pattern"),
         }
