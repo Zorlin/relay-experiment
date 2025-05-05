@@ -455,7 +455,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             _ = status_interval.tick() => {
                 let info = swarm.network_info();
                 let counters = info.connection_counters();
-                let peers: Vec<_> = info.connected_peers().cloned().collect();
+                let peers: Vec<_> = swarm.connected_peers().cloned().collect();
                 info!(
                     "Status: Connected Peers: {} {:?}, Connections: {{ pending_in: {}, pending_out: {}, established_in: {}, established_out: {}, established: {} }}",
                     peers.len(),
