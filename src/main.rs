@@ -9,7 +9,7 @@ use libp2p::{
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
-use libp2p_connection_limits::TransportExt;
+use libp2p_connection_limits::{TransportExt, ConnectionLimits};
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
 use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
@@ -19,6 +19,7 @@ use log::{info, error, warn, LevelFilter};
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use libp2p::dns::tokio::Transport as TokioDnsConfig;
+use libp2p::core::muxing::StreamMuxerBox;
 use base64::{engine::general_purpose::{STANDARD as base64_engine, STANDARD_NO_PAD}, Engine as _}; // Added base64 imports
 use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent}; // Updated PubSub imports
 use prost::Message; // Import prost::Message trait
