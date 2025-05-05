@@ -596,11 +596,13 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             }
         }
 
-        // Configure the relay behaviour to act as a hop relay
+        // Configure the relay behaviour
         let relay_config = relay::Config {
-            // Enable acting as a hop relay (circuit relay v2)
-            circuit_relay_config: relay::CircuitRelay::active(),
-            // Keep default reservation config (acting as a client)
+            // Enable acting as a hop relay (circuit relay v2) by setting max_circuits > 0
+            // Let's allow a moderate number of circuits.
+            max_circuits: 32, // Example: Allow up to 32 simultaneous circuits
+
+            // Keep other settings as default (e.g., reservation config for acting as a client)
             ..Default::default()
         };
 
