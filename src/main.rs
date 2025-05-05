@@ -249,7 +249,7 @@ mod tests {
            max_reservations: usize::MAX,
            reservation_duration: Duration::from_secs(60 * 60), 
            max_circuit_duration: Duration::from_secs(2 * 60),
-           max_circuit_bytes: 1 << 17, 
+           max_circuit_bytes: 1024 * 1024, // 1MB to match TypeScript's maxMessageSize
            max_reservations_per_peer: 1,
            max_circuits_per_peer: 16,
            circuit_src_rate_limiters: Default::default(),
@@ -736,7 +736,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
              max_reservations: usize::MAX, // Set to unlimited like TypeScript's Infinity
              reservation_duration: Duration::from_secs(60 * 60), // Default
              max_circuit_duration: Duration::from_secs(2 * 60),
-             max_circuit_bytes: 1 << 17, // 128 KiB
+             max_circuit_bytes: 1024 * 1024, // 1MB to match TypeScript's maxMessageSize
              max_reservations_per_peer: 1,
              max_circuits_per_peer: 16,
              circuit_src_rate_limiters: Default::default(),
