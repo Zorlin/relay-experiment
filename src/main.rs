@@ -1022,7 +1022,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // Listen on WebTransport on UDP/443
-    match swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1/webtransport".parse()?) {
+    match swarm.listen_on("/ip4/0.0.0.0/udp/443/webtransport".parse()?) { // Corrected: Removed /quic-v1
         Ok(listener_id) => info!("Listening on WebTransport (UDP/443) with listener ID: {:?}", listener_id),
         Err(e) => warn!("Failed to listen on WebTransport (UDP/443): {}", e),
     }
@@ -1068,7 +1068,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         // Add WebTransport DNS address
-        let wt_addr = format!("/dns4/{}/udp/443/quic-v1/webtransport/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        let wt_addr = format!("/dns4/{}/udp/443/webtransport/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
         match wt_addr {
             Ok(addr) => {
                 swarm.add_external_address(addr.clone());
@@ -1129,8 +1129,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         info!("No valid bootstrap peers to dial.");
     }
-    swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1".parse()?)?;
-    swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1/webtransport".parse()?)?;
+    // REMOVED duplicate listen_on calls for QUIC and WebTransport
+    // swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1".parse()?)?;
+    // swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1/webtransport".parse()?)?;
 
     // Clone Arc for the web server task
     let server_listening_addresses = listening_addresses.clone();
