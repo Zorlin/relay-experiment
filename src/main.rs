@@ -595,8 +595,17 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
                 }
             }
         }
+
+        // Configure the relay behaviour to act as a hop relay
+        let relay_config = relay::Config {
+            // Enable acting as a hop relay (circuit relay v2)
+            circuit_relay_config: relay::CircuitRelay::active(),
+            // Keep default reservation config (acting as a client)
+            ..Default::default()
+        };
+
         RelayBehaviour {
-           relay: relay::Behaviour::new(local_peer_id, Default::default()),
+           relay: relay::Behaviour::new(local_peer_id, relay_config), // Use the configured relay settings
            ping: ping::Behaviour::new(ping::Config::new()),
            identify: identify::Behaviour::new(identify_config),
            pubsub: gossipsub,
