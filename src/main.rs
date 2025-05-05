@@ -259,13 +259,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok(key_b64) => {
             match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
                 Ok(key_bytes) => {
-                    match Keypair::from_protobuf_encoding(&key_bytes) {
+                    match Keypair::ed25519_from_bytes(&key_bytes) {
                         Ok(keypair) => {
-                            info!("Loaded identity from CLEF_PRIVEE_RELAI.");
+                            info!("Loaded identity from CLEF_PRIVEE_RELAI (ed25519).");
                             keypair
                         },
                         Err(e) => {
-                            warn!("Failed to decode CLEF_PRIVEE_RELAI (protobuf): {}. Generating random identity.", e);
+                            warn!("Failed to decode CLEF_PRIVEE_RELAI as raw Ed25519 key: {}. Generating random identity.", e);
                             Keypair::generate_ed25519()
                         }
                     }
