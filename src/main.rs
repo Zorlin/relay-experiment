@@ -1,11 +1,11 @@
 use futures::stream::StreamExt;
 use libp2p::{
-    // Removed unused Version import
+    core::transport::upgrade::Version, // Added back Version import
     identity::{Keypair},
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, Multiaddr, PeerId, SwarmBuilder, Transport,
-    // Removed unused dns import
+    dns, // Added back dns import
     // Removed unused websocket import, access via libp2p::websocket
 };
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
@@ -288,28 +288,44 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
 
 
-    // Build the Swarm using the standard builder pattern, adding transports
-    let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone()) // Use cloned key here
-        .with_tokio() // Specify the Tokio executor
-        .with_dns()? // Enable DNS resolution for Multiaddrs *before* transports
-        .with_tcp(
-            tcp::Config::default().nodelay(true),
-            noise::Config::new, // Noise authentication config
-            libp2p::yamux::Config::default, // Yamux multiplexing config
-        )?
-        .with_websocket(
-            noise::Config::new, // Noise authentication config for WebSocket
-            libp2p::yamux::Config::default, // Yamux multiplexing config for WebSocket
-        ).await? // Added .await here
-        // Removed .with_dns()? from here
-        .with_behaviour(move |_key| { // Define the behaviour; _key is the identity Keypair
-             // We use local_peer_id and identify_config captured from the outer scope.
-             RelayBehaviour {
-                relay: relay::Behaviour::new(local_peer_id, Default::default()),
-                ping: ping::Behaviour::new(ping::Config::new()),
-                identify: identify::Behaviour::new(identify_config), // Use identify_config directly
-            }
-        })?
+    // Build the transport: Combine DNS, TCP, and WebSocket
+    let transport = {
+        // Create TCP transport
+        let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
+            .upgrade(Version::V1Lazy)
+            .authenticate(noise::Config::new(&local_key)?)
+            .multiplex(libp2p::yamux::Config::default())
+            .timeout(Duration::from_secs(20)) // Add connection timeout
+            .boxed();
+
+        // Create WebSocket transport
+        let ws_transport = libp2p::websocket::Transport::new()
+            .upgrade(Version::V1Lazy)
+            .authenticate(noise::Config::new(&local_key)?)
+            .multiplex(libp2p::yamux::Config::default())
+            .timeout(Duration::from_secs(20)) // Add connection timeout
+            .boxed();
+
+        // Combine TCP and WS transports
+        let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
+
+        // Wrap with DNS resolver
+        libp2p::dns::tokio::Transport::system(tcp_or_ws_transport).await?
+            .boxed()
+    };
+
+    // Create the behaviour
+    let behaviour = {
+        // We use local_peer_id and identify_config captured from the outer scope.
+        RelayBehaviour {
+           relay: relay::Behaviour::new(local_peer_id, Default::default()),
+           ping: ping::Behaviour::new(ping::Config::new()),
+           identify: identify::Behaviour::new(identify_config), // Use identify_config directly
+       }
+    };
+
+    // Build the Swarm using the manually constructed transport and behaviour
+    let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id)
         // Configure the swarm further (timeouts, limits, etc.)
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build(); // Finalize the swarm build
