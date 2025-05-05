@@ -162,7 +162,7 @@ mod tests {
                MessageAuthenticity::Anonymous,
                GossipsubConfigBuilder::from(GossipsubConfig::default())
                    .validation_mode(libp2p::gossipsub::ValidationMode::Permissive)
-                   .build()
+                   .build().expect("Failed to build GossipsubConfig")
            ).unwrap(),
        };
 
