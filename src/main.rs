@@ -618,12 +618,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
-            .multiplex({
-                let mut config = libp2p::yamux::Config::default();
-                config.set_max_buffer_size(16 * 1024 * 1024); // 16 MiB
-                config.set_max_num_streams(2048); // Up from default 256
-                config
-            })
+            // Match TS: Only offer default Yamux
+            .multiplex(libp2p::yamux::Config::default())
             .timeout(Duration::from_secs(20))
             .boxed();
 
@@ -654,12 +650,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             libp2p::websocket::WsConfig::new(dns_tcp)
                 .upgrade(Version::V1Lazy)
                 .authenticate(noise::Config::new(&local_key)?)
-                .multiplex({
-                    let mut config = libp2p::yamux::Config::default();
-                    config.set_max_buffer_size(16 * 1024 * 1024); // 16 MiB
-                    config.set_max_num_streams(2048); // Up from default 256
-                    config
-                })
+                // Match TS: Only offer default Yamux
+                .multiplex(libp2p::yamux::Config::default())
                 .timeout(Duration::from_secs(20))
                 .boxed()
         };
@@ -723,7 +715,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .fanout_ttl(Duration::from_secs(60)) // Keep matching TS default 60s
             .gossip_lazy(6) // Keep matching TS default D_lazy=6
             .gossip_factor(0.25) // Keep matching TS default 0.25
-            .peer_score_params(score_params) // Explicitly set score params matching TS
+            // REMOVED: .peer_score_params(score_params) // Keeping default score params for now
             .build()
             .expect("Valid GossipSub configuration");
         
