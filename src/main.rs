@@ -6,7 +6,6 @@ use libp2p::{
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
     /* Removed unused tcp import */ Multiaddr, PeerId, SwarmBuilder, Transport,
-    connection_limits::ConnectionLimits,
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
