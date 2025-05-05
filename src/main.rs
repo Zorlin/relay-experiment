@@ -34,6 +34,42 @@ pub mod identity_proto {
     include!(concat!(env!("OUT_DIR"), "/relay.identity.proto.rs"));
 }
 
+// Add these imports at the top of the file
+use std::collections::hash_map::Entry;
+use rand::seq::SliceRandom;
+use libp2p::core::ConnectedPoint;
+
+// Add serde support for PeerId and Multiaddr
+use serde::{Deserialize, Serialize};
+
+// Define wrapper types for PeerId and Multiaddr that can be serialized
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SerializablePeer {
+    id: String,
+    addrs: Vec<String>,
+}
+
+impl From<(PeerId, Vec<Multiaddr>)> for SerializablePeer {
+    fn from((peer_id, addrs): (PeerId, Vec<Multiaddr>)) -> Self {
+        SerializablePeer {
+            id: peer_id.to_string(),
+            addrs: addrs.into_iter().map(|a| a.to_string()).collect(),
+        }
+    }
+}
+
+impl SerializablePeer {
+    fn to_peer_info(&self) -> Result<(PeerId, Vec<Multiaddr>), Box<dyn std::error::Error>> {
+        let peer_id = self.id.parse::<PeerId>()?;
+        let addrs = self.addrs
+            .iter()
+            .filter_map(|a| a.parse::<Multiaddr>().ok())
+            .collect();
+        
+        Ok((peer_id, addrs))
+    }
+}
+
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
 // The `relay::Behaviour` emits `void::Void`, so we don't need a custom event for it.
@@ -647,7 +683,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     let behaviour = {
         // Configure GossipSub with parameters similar to the TypeScript implementation
         let gossipsub_config = libp2p::gossipsub::ConfigBuilder::default()
-            .max_transmit_size(1024 * 1024) // 1MB max message size
+            .max_transmit_size(1024 * 1024) // 1MB max message size - matches TS's 1e6
             .heartbeat_interval(Duration::from_secs(20))
             .validation_mode(ValidationMode::Permissive) // Allow all messages
             .mesh_outbound_min(2) // Ensure outbound connections for proper relay
@@ -682,10 +718,18 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             }
         }
 
+        // Always subscribe to the réseau-constellation topic like in TypeScript implementation
+        let constellation_topic = Sha256Topic::new("réseau-constellation");
+        if gossipsub.subscribe(&constellation_topic).is_err() {
+            error!("Failed to subscribe to réseau-constellation topic");
+        } else {
+            info!("Peer {} subscribed to topic: réseau-constellation", local_peer_id);
+        }
+
         // Configure the relay behaviour - add unlimited reservations like in TypeScript
         let relay_config = relay::Config {
              max_circuits: 32,
-             max_reservations: usize::MAX, // Set to unlimited like TypeScript
+             max_reservations: usize::MAX, // Set to unlimited like TypeScript's Infinity
              reservation_duration: Duration::from_secs(60 * 60), // Default
              max_circuit_duration: Duration::from_secs(2 * 60),
              max_circuit_bytes: 1 << 17, // 128 KiB
@@ -697,7 +741,6 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
         // Configure AutoNAT
         let autonat_config = autonat::Config { 
-            // Keep defaults, or customize here
             ..Default::default()
         };
 
@@ -1032,6 +1075,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Clone Arc for the web server task
     let server_listening_addresses = listening_addresses.clone();
 
+    // Set up peer discovery via PubSub for constellation peers
+    let peer_disc_topic = Sha256Topic::new("constellation._peer-discovery._p2p._pubsub");
+    info!("Peer {} subscribed to topic: {}", local_peer_id, peer_disc_topic);
+    swarm.behaviour_mut().pubsub.subscribe(&peer_disc_topic).expect("Failed to subscribe to peer discovery topic");
+    
+    // Track last time we published peer info
+    let mut last_peer_discovery = std::time::Instant::now();
+    let peer_discovery_interval = Duration::from_secs(60); // Publish every minute
+    
+    // Store peer IDs and their multiaddresses for discovery
+    let mut known_peers: HashMap<PeerId, Vec<Multiaddr>> = HashMap::new();
+
     // Spawn the web server task
     tokio::spawn(async move {
         info!("Starting web server on port 8000...");
@@ -1113,136 +1168,197 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // Remove the expired address from our shared list
                         addresses_for_event.lock().retain(|a| *a != address);
                     }
-                    SwarmEvent::Behaviour(RelayEvent::Identify(identify_event)) => {
-                        match identify_event {
-                            identify::Event::Received { peer_id, info, .. } => {
-                                info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
-                                for addr in info.listen_addrs {
-                                    swarm.add_external_address(addr.clone());
-                                    info!("Added external address from Identify: {}", addr);
+                    SwarmEvent::Behaviour(behaviour) => {
+                        match behaviour {
+                            RelayEvent::Identify(identify_event) => {
+                                match identify_event {
+                                    identify::Event::Received { peer_id, info, .. } => {
+                                        info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
+                                        for addr in info.listen_addrs {
+                                            swarm.add_external_address(addr.clone());
+                                            info!("Added external address from Identify: {}", addr);
+                                        }
+                                    }
+                                    _ => info!("Other Identify event: {:?}", identify_event),
                                 }
                             }
-                            _ => info!("Other Identify event: {:?}", identify_event),
-                        }
-                    }
-                    SwarmEvent::Behaviour(RelayEvent::Ping(ping_event)) => {
-                        info!("Ping event: {:?}", ping_event);
-                    }
-                    SwarmEvent::Behaviour(RelayEvent::Relay(relay_event)) => {
-                        match relay_event {
-                            relay::Event::ReservationReqAccepted { src_peer_id, renewed, .. } => {
-                                if renewed {
-                                    info!("Relay reservation renewed for client: {}", src_peer_id);
-                                } else {
-                                    info!("Client {} successfully reserved relay hop", src_peer_id);
-                                }
+                            RelayEvent::Ping(ping_event) => {
+                                info!("Ping event: {:?}", ping_event);
                             }
-                            relay::Event::ReservationTimedOut { src_peer_id, .. } => {
-                                warn!("Relay reservation timed out for client: {}", src_peer_id);
-                            }
-                            _ => {
-                                info!("Other Relay event: {:?}", relay_event);
-                            }
-                        }
-                    }
-                    SwarmEvent::Behaviour(RelayEvent::Pubsub(pubsub_event)) => {
-                        match pubsub_event {
-                            GossipsubEvent::Subscribed { peer_id, topic } => {
-                                info!("Peer {} subscribed to topic: {}", peer_id, topic);
-                                let topic_name = topic.to_string();
-
-                                // Recreate the Topic type from the hash/name for subscribe call
-                                let topic_to_subscribe = Sha256Topic::new(topic_name.clone());
-
-                                // Track the peer's subscription
-                                let peer_topics = relay_reqs.entry(peer_id).or_default();
-                                peer_topics.insert(topic_name.clone());
-
-                                // Check if the relay needs to subscribe (if it wasn't already)
-                                // We assume the relay should be subscribed if at least one peer needs it OR it's an always_relay topic.
-                                // Gossipsub::subscribe is idempotent, so calling it again is safe.
-                                if let Err(e) = swarm.behaviour_mut().pubsub.subscribe(&topic_to_subscribe) {
-                                    error!("Error subscribing relay to topic {} after peer subscription: {}", topic_name, e);
-                                } else {
-                                     // Optional: Add log if needed, but subscribe is idempotent.
-                                     // info!("Ensured relay is subscribed to topic: {}", topic_name);
-                                }
-                            }
-                            GossipsubEvent::Unsubscribed { peer_id, topic } => {
-                                info!("Peer {} unsubscribed from topic: {}", peer_id, topic);
-                                let topic_name = topic.to_string();
-
-                                // Recreate the Topic type from the hash/name for unsubscribe call
-                                let topic_to_unsubscribe = Sha256Topic::new(topic_name.clone());
-
-                                // Remove the topic from the peer's tracked subscriptions
-                                let mut remove_peer_entry = false;
-                                if let Some(peer_topics) = relay_reqs.get_mut(&peer_id) {
-                                    peer_topics.remove(&topic_name);
-                                    if peer_topics.is_empty() {
-                                        remove_peer_entry = true;
+                            RelayEvent::Relay(relay_event) => {
+                                match relay_event {
+                                    relay::Event::ReservationReqAccepted { src_peer_id, renewed, .. } => {
+                                        if renewed {
+                                            info!("Relay reservation renewed for client: {}", src_peer_id);
+                                        } else {
+                                            info!("Client {} successfully reserved relay hop", src_peer_id);
+                                        }
+                                    }
+                                    relay::Event::ReservationTimedOut { src_peer_id, .. } => {
+                                        warn!("Relay reservation timed out for client: {}", src_peer_id);
+                                    }
+                                    _ => {
+                                        info!("Other Relay event: {:?}", relay_event);
                                     }
                                 }
-                                if remove_peer_entry {
-                                    relay_reqs.remove(&peer_id);
-                                }
+                            }
+                            RelayEvent::Pubsub(pubsub_event) => {
+                                match pubsub_event {
+                                    GossipsubEvent::Subscribed { peer_id, topic } => {
+                                        info!("Peer {} subscribed to topic: {}", peer_id, topic);
+                                        let topic_name = topic.to_string();
 
-                                // Check if the relay can unsubscribe from this topic
-                                let still_needed = relay_reqs.values().any(|topics| topics.contains(&topic_name))
+                                        // Recreate the Topic type from the hash/name for subscribe call
+                                        let topic_to_subscribe = Sha256Topic::new(topic_name.clone());
+
+                                        // Track the peer's subscription
+                                        let peer_topics = relay_reqs.entry(peer_id).or_default();
+                                        peer_topics.insert(topic_name.clone());
+
+                                        // ** Enhanced relay behavior similar to TypeScript implementation **
+                                        // The TypeScript implementation automatically subscribes the relay to all topics
+                                        // that any peer subscribes to. This enables proper message routing.
+                                        // Check if the relay needs to subscribe (if it wasn't already)
+                                        // We assume the relay should be subscribed if at least one peer needs it OR it's an always_relay topic.
+                                        // Note: GossipSub.subscribe is idempotent (safe to call multiple times)
+                                        if let Err(e) = swarm.behaviour_mut().pubsub.subscribe(&topic_to_subscribe) {
+                                            error!("Error subscribing relay to topic {} after peer subscription: {}", topic_name, e);
+                                        } else {
+                                            info!("Ensuring relay is subscribed to topic requested by peer: {}", topic_name);
+                                        }
+                                    }
+                                    GossipsubEvent::Unsubscribed { peer_id, topic } => {
+                                        info!("Peer {} unsubscribed from topic: {}", peer_id, topic);
+                                        let topic_name = topic.to_string();
+
+                                        // Recreate the Topic type from the hash/name for unsubscribe call
+                                        let topic_to_unsubscribe = Sha256Topic::new(topic_name.clone());
+
+                                        // Remove the topic from the peer's tracked subscriptions
+                                        let mut remove_peer_entry = false;
+                                        if let Some(peer_topics) = relay_reqs.get_mut(&peer_id) {
+                                            peer_topics.remove(&topic_name);
+                                            if peer_topics.is_empty() {
+                                                remove_peer_entry = true;
+                                            }
+                                        }
+                                        if remove_peer_entry {
+                                            relay_reqs.remove(&peer_id);
+                                        }
+
+                                        // Check if the relay can unsubscribe from this topic
+                                        let still_needed = relay_reqs.values().any(|topics| topics.contains(&topic_name))
                                                    || always_relay.contains(&topic_name);
 
-                                if !still_needed {
-                                    info!("No other peer needs topic {} and it's not always_relay. Unsubscribing relay.", topic_name);
-                                    // Use boolean check for unsubscribe result
-                                    if !swarm.behaviour_mut().pubsub.unsubscribe(&topic_to_unsubscribe) {
-                                        // Log if unsubscribe returned false (e.g., wasn't subscribed) - usually benign
-                                        warn!("Relay unsubscribe call for topic {} returned false (might have been already unsubscribed).", topic_name);
-                                    } else {
-                                        info!("Relay unsubscribed from topic: {}", topic_name);
+                                        if !still_needed {
+                                            info!("No other peer needs topic {} and it's not always_relay. Unsubscribing relay.", topic_name);
+                                            // Use boolean check for unsubscribe result
+                                            if !swarm.behaviour_mut().pubsub.unsubscribe(&topic_to_unsubscribe) {
+                                                // Log if unsubscribe returned false (e.g., wasn't subscribed) - usually benign
+                                                warn!("Relay unsubscribe call for topic {} returned false (might have been already unsubscribed).", topic_name);
+                                            } else {
+                                                info!("Relay unsubscribed from topic: {}", topic_name);
+                                            }
+                                        } else {
+                                            info!("Relay keeps subscription to topic {} after peer disconnect (needed by others or always_relay).", topic_name);
+                                        }
                                     }
-                                } else {
-                                    info!("Relay keeps subscription to topic {} after peer disconnect (needed by others or always_relay).", topic_name);
+                                    GossipsubEvent::Message { message, .. } => {
+                                        info!("Received PubSub message: {:?}, Topic={}, Data='{}'", message.source, message.topic, String::from_utf8_lossy(&message.data));
+                                        
+                                        // Check if this is a peer discovery message
+                                        if message.topic.as_str() == peer_disc_topic.hash().as_str() {
+                                            info!("Received peer discovery message from {:?}", message.source);
+                                            
+                                            // Try to parse peer information
+                                            if let Ok(peers_info) = serde_json::from_slice::<Vec<SerializablePeer>>(&message.data) {
+                                                for serializable_peer in peers_info {
+                                                    match serializable_peer.to_peer_info() {
+                                                        Ok((peer_id, addrs)) => {
+                                                            // Skip ourselves
+                                                            if peer_id == local_peer_id {
+                                                                continue;
+                                                            }
+                                                            
+                                                            // Update our known peers
+                                                            match known_peers.entry(peer_id) {
+                                                                Entry::Occupied(mut e) => {
+                                                                    // Add new addresses we don't already know
+                                                                    for addr in addrs {
+                                                                        if !e.get().contains(&addr) {
+                                                                            e.get_mut().push(addr);
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Entry::Vacant(e) => {
+                                                                    e.insert(addrs);
+                                                                }
+                                                            }
+                                                            
+                                                            // If not already connected, try to dial this peer
+                                                            if !swarm.is_connected(&peer_id) {
+                                                                if let Some(peer_addrs) = known_peers.get(&peer_id) {
+                                                                    if !peer_addrs.is_empty() {
+                                                                        // Choose a random address to try
+                                                                        if let Some(addr) = peer_addrs.choose(&mut rand::thread_rng()) {
+                                                                            info!("Discovered new peer via pubsub, dialing {} at {}", peer_id, addr);
+                                                                            match swarm.dial(addr.clone()) {
+                                                                                Ok(_) => info!("Dialing peer {} discovered via PubSub", peer_id),
+                                                                                Err(e) => warn!("Failed to dial discovered peer {}: {}", peer_id, e),
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        Err(e) => warn!("Failed to parse peer info: {}", e),
+                                                    }
+                                                }
+                                            } else {
+                                                warn!("Received invalid peer discovery message");
+                                            }
+                                        } else {
+                                            // Handle regular pubsub message - just log it for now
+                                            info!(
+                                                "Received PubSub message: From={:?}, Topic={}, Data='{}'",
+                                                message.source,
+                                                message.topic,
+                                                String::from_utf8_lossy(&message.data)
+                                            );
+                                            
+                                            // The message is automatically relayed by GossipSub to all subscribers
+                                            info!("Handling message for topic {} - will be relayed to all subscribed peers", message.topic);
+                                        }
+                                    }
+                                    _ => {
+                                        info!("Other PubSub event: {:?}", pubsub_event);
+                                    }
                                 }
                             }
-                            GossipsubEvent::Message { message, .. } => {
-                                info!(
-                                    "Received PubSub message: From={:?}, Topic={}, Data='{}'",
-                                    message.source,
-                                    message.topic,
-                                    String::from_utf8_lossy(&message.data)
-                                );
-                                
-                                // The message is automatically relayed by GossipSub when configured properly
-                                // Just log that we're handling it for debugging purposes
-                                info!("Handling message for topic {} - will be relayed to all subscribed peers", message.topic);
+                            RelayEvent::Dcutr(event) => {
+                                match event.result {
+                                    Ok(connection_id) => {
+                                        info!("DCUtR connection successful with peer {}, connection ID: {:?}", 
+                                              event.remote_peer_id, connection_id);
+                                    },
+                                    Err(error) => {
+                                        warn!("DCUtR failed with peer {}: {:?}", 
+                                              event.remote_peer_id, error);
+                                    }
+                                }
                             }
-                            _ => {
-                                info!("Other PubSub event: {:?}", pubsub_event);
-                            }
-                        }
-                    }
-                    SwarmEvent::Behaviour(RelayEvent::Dcutr(event)) => {
-                        match event.result {
-                            Ok(connection_id) => {
-                                info!("DCUtR connection successful with peer {}, connection ID: {:?}", 
-                                      event.remote_peer_id, connection_id);
-                            },
-                            Err(error) => {
-                                warn!("DCUtR failed with peer {}: {:?}", 
-                                      event.remote_peer_id, error);
-                            }
-                        }
-                    }
-                    SwarmEvent::Behaviour(RelayEvent::AutoNat(autonat_event)) => {
-                        match autonat_event {
-                            autonat::Event::StatusChanged { old, new } => {
-                                info!("AutoNAT status changed from {:?} to {:?}", old, new);
-                            }
-                            autonat::Event::InboundProbe(e) => {
-                                info!("AutoNAT inbound probe event: {:?}", e); 
-                            }
-                             autonat::Event::OutboundProbe(e) => {
-                                info!("AutoNAT outbound probe event: {:?}", e); 
+                            RelayEvent::AutoNat(autonat_event) => {
+                                match autonat_event {
+                                    autonat::Event::StatusChanged { old, new } => {
+                                        info!("AutoNAT status changed from {:?} to {:?}", old, new);
+                                    }
+                                    autonat::Event::OutboundProbe(e) => {
+                                        info!("AutoNAT outbound probe event: {:?}", e); 
+                                    }
+                                    autonat::Event::InboundProbe(e) => {
+                                        info!("AutoNAT inbound probe event: {:?}", e); 
+                                    }
+                                }
                             }
                         }
                     }
@@ -1253,11 +1369,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         );
                         let connected_peers_count = swarm.connected_peers().count();
                         info!("Connected peers count after establishment: {}", connected_peers_count);
+                        
+                        // Store this peer's address
+                        if let ConnectedPoint::Dialer { address, .. } = endpoint {
+                            match known_peers.entry(peer_id) {
+                                Entry::Occupied(mut e) => {
+                                    if !e.get().contains(&address) {
+                                        e.get_mut().push(address);
+                                    }
+                                }
+                                Entry::Vacant(e) => {
+                                    e.insert(vec![address]);
+                                }
+                            }
+                        }
                     }
-                     SwarmEvent::ConnectionClosed { peer_id, connection_id, endpoint, num_established, cause, .. } => {
+                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                         info!(
-                            "Connection closed: peer={}, connection_id={:?}, endpoint={:?}, num_established={}, reason={:?}",
-                            peer_id, connection_id, endpoint.get_remote_address(), num_established, cause
+                            "Connection closed to peer: {}, cause: {:?}",
+                            peer_id, cause
                         );
                          let connected_peers_count = swarm.connected_peers().count();
                         info!("Connected peers count after closure: {}", connected_peers_count);
@@ -1312,6 +1442,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     _ => {
                         // Handle other swarm events as needed
                         // info!("Unhandled Swarm Event: {:?}", event);
+                    }
+                }
+
+                // Check if it's time to broadcast our known peers for discovery
+                if last_peer_discovery.elapsed() >= peer_discovery_interval {
+                    last_peer_discovery = std::time::Instant::now();
+                    
+                    // Get our current peers from the swarm
+                    let connected_peers: Vec<SerializablePeer> = swarm
+                        .connected_peers()
+                        .map(|&peer_id| {
+                            // Get addresses for this peer
+                            let addrs = known_peers
+                                .get(&peer_id)
+                                .cloned()
+                                .unwrap_or_default();
+                            SerializablePeer::from((peer_id, addrs))
+                        })
+                        .collect();
+                    
+                    // Only broadcast if we have peers to share
+                    if !connected_peers.is_empty() {
+                        // Serialize peer information to JSON
+                        if let Ok(peer_info_json) = serde_json::to_string(&connected_peers) {
+                            // Publish to the peer discovery topic
+                            match swarm.behaviour_mut().pubsub.publish(
+                                peer_disc_topic.clone(),
+                                peer_info_json.as_bytes(),
+                            ) {
+                                Ok(_) => info!("Published peer discovery info for {} peers", connected_peers.len()),
+                                Err(e) => error!("Failed to publish peer discovery info: {}", e),
+                            }
+                        }
                     }
                 }
             }
