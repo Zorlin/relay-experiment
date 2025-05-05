@@ -609,8 +609,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         // WebRTC Transport
         let webrtc_cert = WebRtcCertificate::generate(&mut rand::thread_rng())?;
         let webrtc_transport = WebRtcTransport::new(local_key.clone(), webrtc_cert)
-            // Ensure strict protocol handling with clear WebRTC identifier
-            .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn)))
+            // No extra mapping needed, the default is fine
             .boxed();
 
         // WebTransport Transport
@@ -627,7 +626,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
                 match either_output {
                     Either::Left(Either::Left(Either::Left(tcp_conn))) => tcp_conn,
                     Either::Left(Either::Left(Either::Right(ws_conn))) => ws_conn,
-                    Either::Left(Either::Right(webrtc_conn)) => webrtc_conn,
+                    Either::Left(Either::Right(webrtc_conn)) => (webrtc_conn.0, StreamMuxerBox::new(webrtc_conn.1)),
                     // Map WebTransport connection to StreamMuxerBox
                     Either::Right(webtransport_conn) => (webtransport_conn.0, StreamMuxerBox::new(webtransport_conn.1)),
                 }
@@ -818,18 +817,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Listen on all interfaces for WebSocket on port 12345
     let listen_addr_ws = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
     swarm.listen_on(listen_addr_ws)?;
-    // Also listen on WebRTC multiaddr for direct peer connections, skip if unsupported
-    let webrtc_addr_str = format!("/webrtc/p2p/{}", local_peer_id);
-    match webrtc_addr_str.parse::<Multiaddr>() {
-        Ok(addr) => {
-            if let Err(e_transport) = swarm.listen_on(addr) {
-                warn!("WebRTC multiaddr unsupported or failed to listen ({}), skipping: {}", webrtc_addr_str, e_transport);
-            }
-        }
-        Err(e) => {
-            warn!("WebRTC multiaddr unsupported or failed to parse ({}), skipping: {}", webrtc_addr_str, e);
-        }
+
+    // Also listen on WebRTC multiaddr for direct peer connections
+    match swarm.listen_on("/webrtc".parse()?) {
+        Ok(listener_id) => info!("Listening on WebRTC with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on WebRTC: {}", e),
     }
+    
+    // Also add explicit WebRTC address for our peer ID (helps with discovery)
+    let webrtc_addr: Multiaddr = format!("/webrtc/p2p/{}", local_peer_id).parse()?;
+    swarm.add_external_address(webrtc_addr.clone());
+    info!("Added external WebRTC address: {}", webrtc_addr);
+
+    // Listen on WebRTC Direct for UDP-based WebRTC connections
+    // Removed due to missing transport
 
     // If a domain name is provided, also try listening on a DNS address.
     // This helps ensure the address is advertised correctly via Identify.
