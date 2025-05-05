@@ -1,7 +1,7 @@
 use futures::stream::StreamExt;
 use libp2p::{
     core::transport::upgrade::Version, // Needed for Websocket upgrade
-    identity::{self, Keypair}, // Explicitly import Keypair
+    identity::{Keypair}, // Removed unused 'self' import
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, Multiaddr, PeerId, SwarmBuilder, Transport,
@@ -241,7 +241,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Ok(key_b64) => {
             match base64_engine.decode(key_b64.as_bytes()) {
                 Ok(key_bytes) => {
-                    match Keypair::try_from_protobuf_encoding(&key_bytes) { // Try decoding from protobuf first (common format)
+                    match Keypair::from_protobuf_encoding(&key_bytes) { // Corrected function name
                         Ok(keypair) => {
                             info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf).");
                             keypair
@@ -301,7 +301,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .boxed();
 
         // Configure Websocket transport (using the corrected libp2p_websocket crate)
-        let ws_transport = websocket::tokio::Transport::new()
+        let ws_transport = websocket::Transport::new() // Removed ::tokio::
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -316,36 +316,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
 
-    // Build the Swarm using the new builder pattern with the custom transport
-    let mut swarm = SwarmBuilder::with_tokio_executor(transport, {
-             // Behaviour construction closure
-             // identify_config is captured by the closure
-             RelayBehaviour {
+    // Build the Swarm using the standard builder pattern
+    let mut swarm = SwarmBuilder::with_existing_identity(local_key) // Start with identity
+        .with_tokio() // Specify the executor
+        .with_transport(transport)? // Provide the custom transport
+        .with_behaviour(move |_key| { // Define the behaviour
+            // _key is the Keypair passed to with_existing_identity.
+            // We use local_peer_id and identify_config captured from the outer scope.
+            RelayBehaviour {
                 relay: relay::Behaviour::new(local_peer_id, Default::default()),
                 ping: ping::Behaviour::new(ping::Config::new()),
-                identify: identify::Behaviour::new(identify_config),
-            }
-        }, local_peer_id)
-        // Example: Set connection limits (optional) - moved from transport builder
-        // .with_connection_limits(libp2p::connection_limits::ConnectionLimits::default())
-        // Example: Set dial concurrency factor (optional)
-        // .with_dial_concurrency_factor(std::num::NonZeroU8::new(8).unwrap())
-        .with_behaviour(|key| {
-            // The behaviour construction might need the keypair now,
-            // although our current RelayBehaviour doesn't directly use it in its constructor.
-            // We pass the peer_id derived earlier.
-             // identify_config is captured by the closure now, no need to clone separately
-             // as it wasn't moved previously.
-             RelayBehaviour {
-                // Use the peer_id derived from the key passed to the closure
-                relay: relay::Behaviour::new(PeerId::from(key.public()), Default::default()),
-                ping: ping::Behaviour::new(ping::Config::new()),
                 identify: identify::Behaviour::new(identify_config), // Use identify_config directly
-            } // <-- Added closing brace for RelayBehaviour struct literal
-        }) // <-- Added closing parenthesis for .with_behaviour() call
-        // Configure the swarm further (timeouts, etc.)
+            }
+        })? // Behaviour construction can fail
+        // Configure the swarm further (timeouts, limits, etc.)
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
-        .build();
+        .build(); // Finalize the swarm build
 
 
     // Define listening addresses
