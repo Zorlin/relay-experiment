@@ -112,8 +112,8 @@ mod tests {
              local_addr: dummy_multiaddr(),
              send_back_addr: dummy_multiaddr(),
         };
-        // Add explicit type annotation for the SwarmEvent's behaviour event
-        let event: SwarmEvent<RelayEvent, _> = SwarmEvent::ConnectionEstablished {
+        // Correct the type annotation for SwarmEvent (only one generic argument)
+        let event: SwarmEvent<RelayEvent> = SwarmEvent::ConnectionEstablished {
             peer_id,
             connection_id: ConnectionId::new_unchecked(0),
             endpoint: dummy_endpoint,
@@ -143,7 +143,8 @@ mod tests {
            local_key.public(),
        );
 
-       let behaviour = RelayBehaviour {
+       // Prefix with underscore to silence unused variable warning
+       let _behaviour = RelayBehaviour {
            relay: relay::Behaviour::new(local_peer_id, Default::default()),
            ping: ping::Behaviour::new(ping::Config::new()),
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
