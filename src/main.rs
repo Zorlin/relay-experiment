@@ -477,10 +477,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // Handle events emitted by the relay::Behaviour
                         // Log when clients request or are accepted as relay
                         match event {
-                            relay::Event::ReservationReqReceived { src_peer_id, .. } => {
+                            relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
                                 info!("New relay reservation request from client: {}", src_peer_id);
                             }
-                            relay::Event::ReservationAccepted { src_peer_id, .. } => {
+                            relay::Event::ReservationReqAccepted { src_peer_id, .. } => {
                                 info!("Client {} successfully reserved relay hop", src_peer_id);
                             }
                             _ => {
