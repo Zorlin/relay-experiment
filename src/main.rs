@@ -17,7 +17,7 @@ use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
-use libp2p::gossipsub::{Gossipsub, GossipsubConfig, MessageAuthenticity, IdentTopic, GossipsubEvent}; // Added PubSub imports
+use libp2p_gossipsub::{Gossipsub, GossipsubConfig, MessageAuthenticity, IdentTopic, GossipsubEvent}; // Added PubSub imports
 
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
@@ -157,6 +157,7 @@ mod tests {
            relay: relay::Behaviour::new(local_peer_id, Default::default()),
            ping: ping::Behaviour::new(ping::Config::new()),
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
+           pubsub: Gossipsub::new(MessageAuthenticity::Anonymous, GossipsubConfig::default()).unwrap(),
        };
 
        // Basic assertion to ensure the behaviour fields are populated.
