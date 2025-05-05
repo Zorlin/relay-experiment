@@ -213,7 +213,7 @@ mod tests {
 
    use super::identity_proto; // Import generated proto module
    use prost::Message; // Import Message trait for encoding test key
-   use bytes::Bytes; // Import Bytes for test encoding
+   // Removed unused bytes::Bytes import
 
    #[test]
    fn test_clef_privée_relai_env_key_loading_custom_protobuf() {
@@ -492,9 +492,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "/libp2p-relay-rust/0.1.0".to_string(),
         local_key.public(),
     )
-    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")))
-    // Increase the limit for concurrent inbound identify push streams
-    .with_max_concurrent_pushes(1000);
+    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
+    // Note: .with_max_concurrent_pushes(1000) was removed as it doesn't exist on identify::Config
 
 
     // Build the transport: Combine DNS, TCP, and WebSocket
