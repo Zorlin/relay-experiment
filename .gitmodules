@@ -4,3 +4,6 @@
 [submodule "relai-original"]
 	path = relai-original
 	url = https://github.com/reseau-constellation/relai-libp2p.git
+[submodule "orbiter-core"]
+	path = orbiter-core
+	url = https://github.com/riffcc/orbiter-core

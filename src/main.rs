@@ -566,12 +566,17 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
     // Create the Identify behaviour configuration
     let identify_config = identify::Config::new(
-        "/libp2p-relay-rust/0.1.0".to_string(),
+        "/libp2p-relay-rust/identify/1.0.0".to_string(), // More specific protocol name
         local_key.public(),
     )
     .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")))
     .with_push_listen_addr_updates(true) // Enable IdentifyPush
     .with_interval(Duration::from_secs(600));
+
+    // Note: We can't currently adjust the max message size for identify protocol in this version 
+    // (libp2p-identify-0.46.0). This means we'll be limited to the default size (~4KiB).
+    // To avoid protocol confusion with WebRTC (which has a 16KiB limit), we're using a more specific
+    // protocol name format.
 
     // Build the transport stack
     let transport = {
@@ -607,6 +612,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         // WebRTC Transport
         let webrtc_cert = WebRtcCertificate::generate(&mut rand::thread_rng())?;
         let webrtc_transport = WebRtcTransport::new(local_key.clone(), webrtc_cert)
+            // Ensure strict protocol handling with clear WebRTC identifier
             .map(|(peer_id, conn), _| (peer_id, StreamMuxerBox::new(conn)))
             .boxed();
 
