@@ -1,11 +1,11 @@
 use futures::stream::StreamExt;
 use libp2p::{
-    core::transport::upgrade::Version, // Needed for Websocket upgrade
-    identity::{Keypair}, // Removed unused 'self' import
+    // Removed unused Version import
+    identity::{Keypair},
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, Multiaddr, PeerId, SwarmBuilder, Transport,
-    dns,
+    // Removed unused dns import
     // Removed unused websocket import, access via libp2p::websocket
 };
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
@@ -299,7 +299,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_websocket(
             noise::Config::new, // Noise authentication config for WebSocket
             libp2p::yamux::Config::default, // Yamux multiplexing config for WebSocket
-        )?
+        ).await? // Added .await here
         .with_dns()? // Enable DNS resolution for Multiaddrs
         .with_behaviour(move |_key| { // Define the behaviour; _key is the identity Keypair
              // We use local_peer_id and identify_config captured from the outer scope.
