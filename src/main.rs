@@ -700,7 +700,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .heartbeat_interval(Duration::from_secs(20))
             .validation_mode(ValidationMode::Permissive) // Allow all messages - equivalent to canRelayMessage=true
             .mesh_outbound_min(2) // Ensure outbound connections for proper relay
-            .mesh_n_low(2) // Lower threshold for mesh maintenance
+            .mesh_n_low(2) // Lower threshold for mesh maintenance - REVERTED FROM 1 to 2
             .allow_self_origin(true) // Allow receiving our own messages
             .duplicate_cache_time(Duration::from_secs(1)) // Shorter duplicate cache to avoid missing messages
             // Note: The Rust implementation doesn't have direct equivalents for allowPublishToZeroTopicPeers
@@ -1590,7 +1590,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         .collect();
                     
                     // Only broadcast if we have enough connected peers (heuristic for mesh readiness)
-                    let mesh_n_low = 2; // Get this from your config ideally, but hardcoding for now
+                    let mesh_n_low = 2; // Get this from your config ideally, but using 2 now
                     if connected_peers.len() > mesh_n_low { // Changed condition from !is_empty()
                         // Serialize peer information to JSON
                         if let Ok(peer_info_json) = serde_json::to_string(&connected_peers) {
