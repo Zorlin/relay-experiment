@@ -474,6 +474,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // These events are related to this node acting *as* a relay (stop/hop)
                         info!("Relay event: {:?}", event);
                     }
+                    SwarmEvent::Behaviour(RelayEvent::Pubsub(event)) => {
+                        // Handle PubSub peer‐discovery events
+                        info!("PubSub event: {:?}", event);
+                    }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         info!("Connection established with: {} on {:?}", peer_id, endpoint.get_remote_address());
                     }
