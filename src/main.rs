@@ -9,6 +9,7 @@ use libp2p::{
 };
 use std::error::Error;
 use std::time::Duration;
+use tokio::time::interval; // Add import for interval timer
 // Removed unused tokio::runtime::Runtime import
 use log::{info, error};
 
@@ -267,9 +268,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // swarm.listen_on(listen_addr_quic)?;
 
 
+    // Create a periodic timer for status logging
+    let mut status_interval = interval(Duration::from_secs(30));
+
     // Main event loop
     loop {
         tokio::select! {
+            // Branch for the status interval timer
+            _ = status_interval.tick() => {
+                let info = swarm.network_info();
+                let counters = info.connection_counters();
+                info!(
+                    "Status: Connected Peers: {}, Connections: {{ pending_in: {}, pending_out: {}, established_in: {}, established_out: {}, established: {} }}",
+                    info.num_peers(),
+                    counters.num_pending_incoming(),
+                    counters.num_pending_outgoing(),
+                    counters.num_established_incoming(),
+                    counters.num_established_outgoing(),
+                    counters.num_established()
+                );
+            }
             event = swarm.select_next_some() => {
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
