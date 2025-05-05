@@ -573,10 +573,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     .with_push_listen_addr_updates(true) // Enable IdentifyPush
     .with_interval(Duration::from_secs(600));
 
-    // Note: We can't currently adjust the max message size for identify protocol in this version 
-    // (libp2p-identify-0.46.0). This means we'll be limited to the default size (~4KiB).
-    // We're using the standard protocol name '/ipfs/id/1.0.0' to ensure compatibility
-    // with the TypeScript implementation.
+    // Note: We can't currently adjust the max message size and stream limits via the Config API.
 
     // Build the transport stack
     let transport = {
