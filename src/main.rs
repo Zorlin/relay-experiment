@@ -299,7 +299,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .boxed();
 
         // Create WebSocket transport using WsConfig
-        let ws_transport = libp2p::websocket::WsConfig::new() // Use WsConfig::new()
+        let ws_transport = libp2p::websocket::WsConfig::new(
+            libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
+        )
+            // Apply the same upgrade and authentication as TCP
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -310,7 +313,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
 
         // Wrap with DNS resolver
-        libp2p::dns::tokio::Transport::system(tcp_or_ws_transport).await?
+        libp2p::dns::tokio::Transport::system(tcp_or_ws_transport)?
             .boxed()
     };
 
@@ -325,11 +328,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Build the Swarm using the manually constructed transport and behaviour
-    let mut swarm = SwarmBuilder::new(transport, behaviour, local_peer_id) // Use SwarmBuilder::new
-        .with_tokio_executor() // Specify the executor after .new()
-        // Configure the swarm further (timeouts, limits, etc.)
+    let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone())
+        .executor(Box::new(|fut| { tokio::spawn(fut); }))
+        .transport(transport, local_peer_id)
+        .behaviour(behaviour)
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
-        .build(); // Finalize the swarm build
+        .build();
 
 
     // Define listening addresses
