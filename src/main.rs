@@ -6,6 +6,7 @@ use libp2p::{
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
     /* Removed unused tcp import */ Multiaddr, PeerId, SwarmBuilder, Transport,
+    connection_limits::ConnectionLimits,
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
@@ -608,6 +609,11 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .with_idle_connection_timeout(Duration::from_secs(60))
             // Increase the limit for concurrently negotiating inbound streams significantly
             .with_max_negotiating_inbound_streams(10000)
+            // Increase connection limits from default 5 peers to 500 peers
+            .with_connection_limits(ConnectionLimits::default()
+                .with_max_established(Some(500))
+                .with_max_established_per_peer(Some(500))
+            )
         )
         .build();
 
