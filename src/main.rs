@@ -312,8 +312,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         // Combine TCP and WS transports
         let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
 
-        // Wrap with DNS resolver
+        // Wrap with DNS resolver and normalize output to (PeerId, StreamMuxerBox)
         libp2p::dns::tokio::Transport::system(tcp_or_ws_transport)?
+            .map(|(peer_id, muxer), _| (peer_id, muxer))
             .boxed()
     };
 
