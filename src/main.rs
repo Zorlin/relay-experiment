@@ -108,7 +108,7 @@ mod tests {
                 protocols: vec![StreamProtocol::new("/test/1")],
                 observed_addr: dummy_multiaddr(),
             },
-            // Removed non-existent 'connection' field
+            connection_id: ConnectionId::new_unchecked(0), // Added missing field
         };
         let event: RelayEvent = identify_event.into();
         assert!(matches!(event, RelayEvent::Identify(identify::Event::Received { .. })));
@@ -187,14 +187,14 @@ mod tests {
        )
        .with_agent_version(agent_version.clone());
 
-       assert_eq!(config.protocol_version, protocol_version);
+       assert_eq!(config.protocol_version(), protocol_version);
        // Field name changed from public_key to local_public_key
-       assert_eq!(config.local_public_key, public_key);
-       assert_eq!(config.agent_version, agent_version);
+       assert_eq!(config.local_public_key(), public_key);
+       assert_eq!(config.agent_version(), agent_version);
        // initial_delay field removed or changed, remove assertion
        // assert_eq!(config.initial_delay, Duration::from_millis(500));
        // Check default interval instead (adjust if libp2p defaults change)
-       assert_eq!(config.interval, Duration::from_secs(5 * 60));
+       assert_eq!(config.interval(), Duration::from_secs(5 * 60));
    }
 }
 
@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ).unwrap();
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
-                let topic = Topic::new(name.trim());
+                let topic = TopicHash::from_raw(name.trim());
                 let _ = gossipsub.subscribe(&topic);
             }
         }
