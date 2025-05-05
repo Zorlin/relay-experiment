@@ -495,16 +495,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     SwarmEvent::Behaviour(RelayEvent::Pubsub(event)) => {
                         // Relay subscriptions: track other peers and mirror their topics
                         match event {
-                            GossipsubEvent::PeerSubscribed(peer_id, topic) => {
+                            GossipsubEvent::Subscribed(peer_id, topic) => {
                                 let topics = relay_reqs.entry(peer_id.clone()).or_default();
                                 topics.insert(topic.to_string());
                                 // Subscribe to the union of all peer topics
                                 let all: HashSet<_> = relay_reqs.values().flatten().cloned().collect();
                                 for t in &all {
-                                    swarm.behaviour_mut().pubsub.subscribe(Sha256Topic::new(t.clone())).unwrap();
+                                    swarm.behaviour_mut().pubsub.subscribe(&Sha256Topic::new(t.clone())).unwrap();
                                 }
                             }
-                            GossipsubEvent::PeerUnsubscribed(peer_id, topic) => {
+                            GossipsubEvent::Unsubscribed(peer_id, topic) => {
                                 if let Some(topics) = relay_reqs.get_mut(&peer_id) {
                                     topics.remove(&topic.to_string());
                                 }
@@ -514,7 +514,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     all.insert(t.clone());
                                 }
                                 for t in &all {
-                                    swarm.behaviour_mut().pubsub.subscribe(Sha256Topic::new(t.clone())).unwrap();
+                                    swarm.behaviour_mut().pubsub.subscribe(&Sha256Topic::new(t.clone())).unwrap();
                                 }
                             }
                             _ => {
