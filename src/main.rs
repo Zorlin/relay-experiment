@@ -17,7 +17,7 @@ use log::{info, error, warn}; // Added warn
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
-use libp2p_gossipsub::{Gossipsub, GossipsubConfig, MessageAuthenticity, IdentTopic, GossipsubEvent}; // Added PubSub imports
+use libp2p::gossipsub::{Gossipsub, GossipsubConfig, MessageAuthenticity, IdentTopic, GossipsubEvent}; // Added PubSub imports
 
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
