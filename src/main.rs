@@ -1,4 +1,5 @@
 use futures::stream::StreamExt;
+use futures::future::Either;
 use libp2p::{
     core::transport::upgrade::Version, // Added back Version import
     identity::{Keypair},
@@ -314,7 +315,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         // Wrap with DNS resolver and normalize output to (PeerId, StreamMuxerBox)
         libp2p::dns::tokio::Transport::system(tcp_or_ws_transport)?
-            .map(|(peer_id, muxer), _| (peer_id, muxer))
+            .map(|either, _endpoint| {
+                match either {
+                    Either::Left((peer_id, muxer)) |
+                    Either::Right((peer_id, muxer)) => (peer_id, muxer),
+                }
+            })
             .boxed()
     };
 
