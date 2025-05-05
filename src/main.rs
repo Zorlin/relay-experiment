@@ -655,6 +655,12 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .allow_self_origin(true) // Allow receiving our own messages
             .duplicate_cache_time(Duration::from_secs(1)) // Shorter duplicate cache to avoid missing messages
             .validate_messages() // Enable message validation
+            // Note: The Rust implementation doesn't have direct equivalents for some JS options
+            // but we can ensure proper message forwarding by configuring the mesh parameters
+            .mesh_n(8) // Aim for this many peers in each topic's mesh (equivalent to D in GossipSubParams)
+            .fanout_ttl(Duration::from_secs(60)) // Keep fanout peers for topics we publish but don't subscribe to
+            .gossip_lazy(6) // Number of non-mesh peers to send gossip to
+            .gossip_factor(0.25) // Percentage of peers to send gossip to each heartbeat
             .build()
             .expect("Valid GossipSub configuration");
         
