@@ -30,7 +30,7 @@ use thiserror::Error;
 
 use crate::proto;
 
-const MAX_MESSAGE_SIZE_BYTES: usize = 16384;
+const MAX_MESSAGE_SIZE_BYTES: usize = 1024 * 1024; // 1MB
 
 pub const PROTOCOL_NAME: StreamProtocol = StreamProtocol::new("/ipfs/id/1.0.0");
 
