@@ -32,3 +32,4 @@ prost-build = "0.13"
 ed25519-dalek = "2.1.1" # For generating test keys
 rand = "0.8.5"          # For generating test keys
 prost-types = "0.13" # Add prost-types for test encoding
+serial_test = "3.1.1"   # For running environment-modifying tests serially

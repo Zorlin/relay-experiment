@@ -67,6 +67,7 @@ mod tests {
     use super::*;
     use base64::engine::general_purpose::STANDARD as base64_engine;
     use base64::Engine;
+    use serial_test::serial; // Import the serial attribute
     // Removed duplicate super import
     use libp2p::{
         ping, identify, // Removed relay import as it's not used directly in tests now
@@ -216,6 +217,7 @@ mod tests {
    // Removed unused bytes::Bytes import
 
    #[test]
+   #[serial] // Run this test serially
    fn test_clef_privée_relai_env_key_loading_custom_protobuf() {
        // Generate a keypair to get raw secret bytes
        let original_keypair = Keypair::generate_ed25519();
@@ -267,6 +269,7 @@ mod tests {
    }
 
    #[test]
+   #[serial] // Run this test serially
    fn test_clef_privée_relai_env_key_loading_invalid_base64() {
        // Set invalid base64 data
        std::env::set_var("CLEF_PRIVEE_RELAI", "this is not base64!");
