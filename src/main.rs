@@ -204,11 +204,10 @@ impl From<identify::Event> for RelayEvent {
 }
 
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
 // Type alias for the shared state of listening addresses
 type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
 
+#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Load environment variables from .env file, ignore errors (e.g., file not found)
     dotenv().ok();
