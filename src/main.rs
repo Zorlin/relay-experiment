@@ -10,6 +10,7 @@ use libp2p::{
     // Removed unused websocket import, access via libp2p::websocket
 };
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
+use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
 use parking_lot::Mutex;
 use tokio::time::interval;
@@ -366,6 +367,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_behaviour(|_| Ok(behaviour))?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
+    // Initialize PubSub relayer state
+    let mut relay_reqs: HashMap<PeerId, HashSet<String>> = HashMap::new();
+    let always_relay: Vec<String> = vec!["réseau-constellation".to_string()];
 
 
     // Define listening addresses
@@ -489,8 +493,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                     }
                     SwarmEvent::Behaviour(RelayEvent::Pubsub(event)) => {
-                        // Handle PubSub peer‐discovery events
-                        info!("PubSub event: {:?}", event);
+                        // Relay subscriptions: track other peers and mirror their topics
+                        match event {
+                            GossipsubEvent::PeerSubscribed(peer_id, topic) => {
+                                let topics = relay_reqs.entry(peer_id.clone()).or_default();
+                                topics.insert(topic.to_string());
+                                // Subscribe to the union of all peer topics
+                                let all: HashSet<_> = relay_reqs.values().flatten().cloned().collect();
+                                for t in &all {
+                                    swarm.behaviour_mut().pubsub.subscribe(Sha256Topic::new(t.clone())).unwrap();
+                                }
+                            }
+                            GossipsubEvent::PeerUnsubscribed(peer_id, topic) => {
+                                if let Some(topics) = relay_reqs.get_mut(&peer_id) {
+                                    topics.remove(&topic.to_string());
+                                }
+                                // Recompute union (including always_relay)
+                                let mut all: HashSet<_> = relay_reqs.values().flatten().cloned().collect();
+                                for t in &always_relay {
+                                    all.insert(t.clone());
+                                }
+                                for t in &all {
+                                    swarm.behaviour_mut().pubsub.subscribe(Sha256Topic::new(t.clone())).unwrap();
+                                }
+                            }
+                            _ => {
+                                info!("PubSub event: {:?}", event);
+                            }
+                        }
                     }
                     SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
                         info!("Connection established with: {} on {:?}", peer_id, endpoint.get_remote_address());
