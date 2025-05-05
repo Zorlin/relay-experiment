@@ -550,13 +550,12 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     .with_interval(Duration::from_secs(600)); // 10 minutes
 
     // Build the transport
-    let base_transport = {
+    let transport = {
         let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
-            .timeout(Duration::from_secs(20))
-            .boxed();
+            .timeout(Duration::from_secs(20));
 
         let ws_transport = libp2p::websocket::WsConfig::new(
             libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
@@ -564,24 +563,22 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
-            .timeout(Duration::from_secs(20))
-            .boxed();
+            .timeout(Duration::from_secs(20));
 
-        let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport).boxed();
+        let tcp_or_ws_transport = tcp_transport.or_transport(ws_transport);
 
-        {
-            let dns = TokioDnsConfig::system(tcp_or_ws_transport)?;
-            dns.map(|either, _| match either {
+        let dns_transport = TokioDnsConfig::system(tcp_or_ws_transport)?
+            .with_connection_limits(ConnectionLimits::default()
+                .with_max_established(Some(500))
+                .with_max_established_per_peer(Some(500))
+            );
+
+        dns_transport
+            .map(|either, _| match either {
                 Either::Left((peer_id, muxer)) | Either::Right((peer_id, muxer)) => (peer_id, muxer),
-            }).boxed()
-        }
+            })
+            .boxed()
     };
-    let transport = base_transport
-        .with_connection_limits(ConnectionLimits::default()
-            .with_max_established(Some(500))
-            .with_max_established_per_peer(Some(500))
-        )
-        .boxed();
 
     // Create the behaviour
     let behaviour = {
