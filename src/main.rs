@@ -351,37 +351,65 @@ fn load_keypair_from_env() -> Result<Keypair, Box<dyn Error>> {
                 .or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes()))
                 .map_err(|e| format!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}", e))?;
 
-            // 2. Decode Protobuf using the custom identity.proto definition
-            let private_key_proto = identity_proto::PrivateKey::decode(Bytes::from(key_bytes))
-                .map_err(|e| format!("Failed to decode base64 bytes as relay.identity.proto.PrivateKey protobuf: {}", e))?;
+            // --- Attempt 1: Check if the decoded bytes look like raw Ed25519 secret key (32 bytes) ---
+            // This is the format likely saved by the TypeScript code.
+            if key_bytes.len() == 32 {
+                info!("Decoded base64 data is 32 bytes long. Attempting to load as raw Ed25519 secret key.");
+                // Try converting the Vec<u8> into a mutable [u8; 32] array.
+                let mut secret_bytes: [u8; 32] = key_bytes.as_slice().try_into()
+                    .map_err(|_| "Internal error: Failed to convert 32-byte Vec<u8> to [u8; 32]".to_string())?; // Should not fail if len == 32
 
-            // 3. Check KeyType and extract raw secret bytes
-            match identity_proto::KeyType::try_from(private_key_proto.r#type) {
-                Ok(identity_proto::KeyType::Ed25519) => {
-                    // 4. Try to create Keypair from the raw secret bytes (`data` field, which is Vec<u8>)
-                    // Keypair::ed25519_from_bytes expects a mutable slice of 32 bytes.
-                    if private_key_proto.data.len() == 32 {
-                        // Try converting the Vec<u8> into a mutable [u8; 32] array.
-                        // This involves copying.
-                        let mut secret_bytes: [u8; 32] = private_key_proto.data.as_slice().try_into()
-                            .map_err(|_| format!("Failed to convert protobuf data Vec<u8> (len {}) to [u8; 32]", private_key_proto.data.len()))?;
-
-                        // Now create the keypair from the mutable array slice
-                        let keypair = Keypair::ed25519_from_bytes(&mut secret_bytes)
-                            .map_err(|e| format!("Failed to create Ed25519 keypair from extracted protobuf data bytes: {}", e))?;
-
-                        info!("Successfully loaded Ed25519 identity from CLEF_PRIVEE_RELAI (custom protobuf format).");
-                        Ok(keypair)
-                    } else {
-                        Err(format!("Extracted Ed25519 data from protobuf is not 32 bytes long (found {} bytes)", private_key_proto.data.len()).into())
+                match Keypair::ed25519_from_bytes(&mut secret_bytes) {
+                    Ok(keypair) => {
+                        info!("Successfully loaded Ed25519 identity from CLEF_PRIVEE_RELAI (raw secret bytes format).");
+                        return Ok(keypair); // Success! Return early.
+                    }
+                    Err(e) => {
+                        warn!("Failed to create Ed25519 keypair from 32-byte raw data: {}. Proceeding to other formats...", e);
+                        // Fall through to try other decoding methods
                     }
                 }
-                Ok(other_type) => {
-                    // Handle other key types if needed in the future
-                    Err(format!("Unsupported key type ({:?}) found in CLEF_PRIVEE_RELAI protobuf", other_type).into())
+            } else {
+                info!("Decoded base64 data is {} bytes long. Not treating as raw Ed25519 secret. Trying protobuf formats...", key_bytes.len());
+            }
+
+            // --- Attempt 2: Decode using standard libp2p Keypair protobuf encoding ---
+            match Keypair::from_protobuf_encoding(&key_bytes) {
+                Ok(keypair) => {
+                    info!("Successfully loaded identity from CLEF_PRIVEE_RELAI (standard libp2p protobuf format).");
+                    Ok(keypair)
                 }
-                Err(_) => {
-                     Err(format!("Invalid key type enum value ({}) found in CLEF_PRIVEE_RELAI protobuf", private_key_proto.r#type).into())
+                Err(libp2p_decode_err) => {
+                    // Standard decoding failed, log it and try the custom format
+                    warn!("Failed to decode CLEF_PRIVEE_RELAI as standard libp2p keypair ({}). Trying custom protobuf format...", libp2p_decode_err);
+
+                    // --- Attempt 3: Decode using custom identity.proto definition ---
+                    // Need Bytes::from for prost decoding. Clone key_bytes as it might be needed if this fails.
+                    match identity_proto::PrivateKey::decode(Bytes::from(key_bytes.clone())) {
+                        Ok(private_key_proto) => {
+                            // Custom protobuf decoded, now extract the key material
+                            match identity_proto::KeyType::try_from(private_key_proto.r#type) {
+                                Ok(identity_proto::KeyType::Ed25519) => {
+                                    if private_key_proto.data.len() == 32 {
+                                        let mut secret_bytes: [u8; 32] = private_key_proto.data.as_slice().try_into()
+                                            .map_err(|_| format!("Custom protobuf: Failed to convert data Vec<u8> (len {}) to [u8; 32]", private_key_proto.data.len()))?;
+                                        let keypair = Keypair::ed25519_from_bytes(&mut secret_bytes)
+                                            .map_err(|e| format!("Custom protobuf: Failed to create Ed25519 keypair from data bytes: {}", e))?;
+                                        info!("Successfully loaded Ed25519 identity from CLEF_PRIVEE_RELAI (custom protobuf format).");
+                                        Ok(keypair)
+                                    } else {
+                                        Err(format!("Custom protobuf: Extracted Ed25519 data is not 32 bytes long (found {} bytes)", private_key_proto.data.len()).into())
+                                    }
+                                }
+                                Ok(other_type) => Err(format!("Custom protobuf: Unsupported key type ({:?})", other_type).into()),
+                                Err(_) => Err(format!("Custom protobuf: Invalid key type enum value ({})", private_key_proto.r#type).into()),
+                            }
+                        }
+                        Err(custom_decode_err) => {
+                            // All decoding attempts failed
+                            Err(format!("Failed to decode CLEF_PRIVEE_RELAI: Not valid raw 32-byte Ed25519, Standard proto decode error: '{}', Custom proto decode error: '{}'", libp2p_decode_err, custom_decode_err).into())
+                        }
+                    }
                 }
             }
         },
