@@ -10,7 +10,7 @@ use libp2p::{
     // Removed top-level Transport trait import
 };
 use std::{env, error::Error, time::Duration, str::FromStr};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap}; // Removed HashSet
 use std::sync::Arc;
 use std::fs;
 use std::io::Write;
@@ -264,7 +264,7 @@ mod tests {
            identify: identify::Behaviour::new(identify_config.clone()),
            pubsub: Gossipsub::new(
                MessageAuthenticity::Anonymous,
-               ConfigBuilder::from(Config::default()).validation_mode(ValidationMode::Permissive).build().unwrap()
+               ConfigBuilder::from(libp2p::gossipsub::Config::default()).validation_mode(ValidationMode::Permissive).build().unwrap() // Explicitly qualify Config
            ).unwrap(),
            dcutr: dcutr::Behaviour::new(local_peer_id),
            autonat: autonat::Behaviour::new(local_peer_id, autonat_config),
@@ -986,7 +986,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Build the Swarm
     let mut swarm = build_swarm(local_key.clone(), pubsub_topics).await?;
-    let mut relay_reqs: HashMap<PeerId, HashSet<String>> = HashMap::new();
     let always_relay: Vec<String> = vec!["réseau-constellation".to_string()];
 
     // Explicitly subscribe to always_relay topics
@@ -1289,10 +1288,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let info = swarm.network_info();
                 let counters = info.connection_counters();
                 let peers: Vec<_> = swarm.connected_peers().cloned().collect();
+                // Log mesh peers for the discovery topic
+                // Corrected: Pass the hash of the topic, not the topic itself
+                let mesh_peers_count = swarm.behaviour().pubsub.mesh_peers(&peer_disc_topic.hash()).count();
                 info!(
-                    "Status: Connected Peers: {} {:?}, Connections: {{ pending_in: {}, pending_out: {}, established_in: {}, established_out: {}, established: {} }}",
+                    "Status: Connected Peers: {} {:?}, Discovery Mesh Peers: {}, Connections: {{ pending_in: {}, pending_out: {}, established_in: {}, established_out: {}, established: {} }}",
                     peers.len(),
                     peers,
+                    mesh_peers_count, // Added mesh peer count
                     counters.num_pending_incoming(),
                     counters.num_pending_outgoing(),
                     counters.num_established_incoming(),
@@ -1361,57 +1364,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         // Recreate the Topic type from the hash/name for subscribe call
                                         let topic_to_subscribe = Sha256Topic::new(topic_name.clone());
 
-                                        // Track the peer's subscription
-                                        let peer_topics = relay_reqs.entry(peer_id).or_default();
-                                        peer_topics.insert(topic_name.clone());
-
-                                        // ** Enhanced relay behavior similar to TypeScript implementation **
-                                        // The TypeScript implementation automatically subscribes the relay to all topics
-                                        // that any peer subscribes to. This enables proper message routing.
-                                        // Check if the relay needs to subscribe (if it wasn't already)
-                                        // We assume the relay should be subscribed if at least one peer needs it OR it's an always_relay topic.
-                                        // Note: GossipSub.subscribe is idempotent (safe to call multiple times)
+                                        // ** Mimic TypeScript: Relay subscribes to any topic a peer subscribes to **
                                         if let Err(e) = swarm.behaviour_mut().pubsub.subscribe(&topic_to_subscribe) {
                                             error!("Error subscribing relay to topic {} after peer subscription: {}", topic_name, e);
                                         } else {
-                                            info!("Ensuring relay is subscribed to topic requested by peer: {}", topic_name);
+                                            info!("Relay ensuring subscription to topic requested by peer: {}", topic_name);
                                         }
                                     }
                                     GossipsubEvent::Unsubscribed { peer_id, topic } => {
                                         info!("Peer {} unsubscribed from topic: {}", peer_id, topic);
-                                        let topic_name = topic.to_string();
-
-                                        // Recreate the Topic type from the hash/name for unsubscribe call
-                                        let topic_to_unsubscribe = Sha256Topic::new(topic_name.clone());
-
-                                        // Remove the topic from the peer's tracked subscriptions
-                                        let mut remove_peer_entry = false;
-                                        if let Some(peer_topics) = relay_reqs.get_mut(&peer_id) {
-                                            peer_topics.remove(&topic_name);
-                                            if peer_topics.is_empty() {
-                                                remove_peer_entry = true;
-                                            }
-                                        }
-                                        if remove_peer_entry {
-                                            relay_reqs.remove(&peer_id);
-                                        }
-
-                                        // Check if the relay can unsubscribe from this topic
-                                        let still_needed = relay_reqs.values().any(|topics| topics.contains(&topic_name))
-                                                   || always_relay.contains(&topic_name);
-
-                                        if !still_needed {
-                                            info!("No other peer needs topic {} and it's not always_relay. Unsubscribing relay.", topic_name);
-                                            // Use boolean check for unsubscribe result
-                                            if !swarm.behaviour_mut().pubsub.unsubscribe(&topic_to_unsubscribe) {
-                                                // Log if unsubscribe returned false (e.g., wasn't subscribed) - usually benign
-                                                warn!("Relay unsubscribe call for topic {} returned false (might have been already unsubscribed).", topic_name);
-                                            } else {
-                                                info!("Relay unsubscribed from topic: {}", topic_name);
-                                            }
-                                        } else {
-                                            info!("Relay keeps subscription to topic {} after peer disconnect (needed by others or always_relay).", topic_name);
-                                        }
+                                        // REMOVED: Logic to track peer unsubscriptions and potentially unsubscribe relay
+                                        // let topic_name = topic.to_string();
+                                        // let topic_to_unsubscribe = Sha256Topic::new(topic_name.clone());
+                                        // ... removal of relay_reqs entry ...
+                                        // ... check if still_needed ...
+                                        // ... conditional unsubscribe ...
                                     }
                                     GossipsubEvent::Message { message, .. } => {
                                         info!("Received PubSub message: {:?}, Topic={}, Data size={}", message.source, message.topic, message.data.len());
@@ -1554,30 +1521,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         info!("Connected peers count after closure: {}", connected_peers_count);
 
                         // When a peer disconnects, check if we can unsubscribe the relay from topics they were the *last* user of.
-                        if let Some(disconnected_peer_topics) = relay_reqs.remove(&peer_id) {
-                             info!("Removed tracked subscriptions for disconnected peer: {}", peer_id);
-
-                             for topic_name in disconnected_peer_topics {
-                                 // Check if the topic is still needed by any REMAINING peer or is an always_relay topic
-                                let still_needed = relay_reqs.values().any(|topics| topics.contains(&topic_name))
-                                                   || always_relay.contains(&topic_name);
-
-                                if !still_needed {
-                                     info!("Disconnected peer {} was the last user of topic {}. Unsubscribing relay.", peer_id, topic_name);
-                                     let topic = Sha256Topic::new(topic_name.clone());
-                                     // Use boolean check for unsubscribe result
-                                     if !swarm.behaviour_mut().pubsub.unsubscribe(&topic) {
-                                         warn!("Relay unsubscribe call for topic {} after disconnect returned false.", topic_name);
-                                     } else {
-                                         info!("Relay unsubscribed from topic {} after peer disconnect", topic_name);
-                                     }
-                                 } else {
-                                     info!("Relay keeps subscription to topic {} after peer disconnect (needed by others or always_relay).", topic_name);
-                                 }
-                             }
-                         } else {
-                             info!("No tracked subscriptions found for disconnected peer: {}", peer_id);
-                         }
+                        // REMOVED: Logic to check/unsubscribe topics when peer disconnects based on relay_reqs
+                        // if let Some(disconnected_peer_topics) = relay_reqs.remove(&peer_id) {
+                        // ... loop through topics ...
+                        // ... check if still_needed ...
+                        // ... conditional unsubscribe ...
+                        // }
                     }
                     // Added `..` to ignore unmentioned fields like connection_id
                     SwarmEvent::IncomingConnection { local_addr, send_back_addr, .. } => {
@@ -1623,8 +1572,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         })
                         .collect();
                     
-                    // Only broadcast if we have peers to share
-                    if !connected_peers.is_empty() {
+                    // Only broadcast if we have enough connected peers (heuristic for mesh readiness)
+                    let mesh_n_low = 2; // Get this from your config ideally, but hardcoding for now
+                    if connected_peers.len() > mesh_n_low { // Changed condition from !is_empty()
                         // Serialize peer information to JSON
                         if let Ok(peer_info_json) = serde_json::to_string(&connected_peers) {
                             // Publish to the peer discovery topic
