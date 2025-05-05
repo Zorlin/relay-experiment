@@ -1577,14 +1577,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     if connected_peers.len() > mesh_n_low { // Changed condition from !is_empty()
                         // Serialize peer information to JSON
                         if let Ok(peer_info_json) = serde_json::to_string(&connected_peers) {
-                            // Publish to the peer discovery topic
-                            match swarm.behaviour_mut().pubsub.publish(
-                                peer_disc_topic.clone(),
-                                peer_info_json.as_bytes(),
-                            ) {
-                                Ok(_) => info!("Published peer discovery info for {} peers", connected_peers.len()),
-                                Err(e) => error!("Failed to publish peer discovery info: {}", e),
+                            // Publish to ALL configured discovery topics
+                            let topics_to_publish = [&peer_disc_topic, &orbiter_disc_topic, &orbiter_content_topic];
+                            for topic in topics_to_publish {
+                                match swarm.behaviour_mut().pubsub.publish(
+                                    topic.clone(), // Clone topic for publish call
+                                    peer_info_json.as_bytes(),
+                                ) {
+                                    Ok(_) => info!("Published peer discovery info on topic {}", topic),
+                                    Err(e) => error!("Failed to publish peer discovery info on topic {}: {}", topic, e),
+                                }
                             }
+                        } else {
+                            error!("Failed to serialize peer discovery info to JSON");
                         }
                     }
                 }
