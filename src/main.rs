@@ -220,9 +220,11 @@ mod tests {
        std::env::set_var("CLEF_PRIVEE_RELAI", &key_b64);
 
        // --- Actually call the function under test ---
-       let loaded_keypair = load_keypair_from_env();
+       let loaded_keypair_result = load_keypair_from_env();
 
-       // Assert that the loaded keypair's public key matches the original one
+       // Assert the result is Ok and the keypair is correct
+       assert!(loaded_keypair_result.is_ok(), "load_keypair_from_env failed: {:?}", loaded_keypair_result.err());
+       let loaded_keypair = loaded_keypair_result.unwrap();
        assert_eq!(loaded_keypair.public(), expected_public_key, "Loaded keypair public key does not match the original");
 
        // Optional: Assert the PeerIds match as well (derived from public key)
@@ -230,6 +232,59 @@ mod tests {
 
        // Clean up environment variable
        std::env::remove_var("CLEF_PRIVEE_RELAI");
+   }
+
+   #[test]
+   fn test_clef_privée_relai_env_key_loading_invalid_base64() {
+       // Set invalid base64 data
+       std::env::set_var("CLEF_PRIVEE_RELAI", "this is not base64!");
+
+       // --- Actually call the function under test ---
+       let loaded_keypair_result = load_keypair_from_env();
+
+       // Assert the result is Err
+       assert!(loaded_keypair_result.is_err(), "load_keypair_from_env should have failed for invalid base64");
+       // Optionally check the error message contains "base64"
+       assert!(loaded_keypair_result.err().unwrap().to_string().contains("base64"));
+
+
+       // Clean up environment variable
+       std::env::remove_var("CLEF_PRIVEE_RELAI");
+   }
+
+    #[test]
+   fn test_clef_privée_relai_env_key_loading_invalid_protobuf() {
+       // Set valid base64, but invalid protobuf data (e.g., just "hello")
+       let invalid_protobuf_b64 = base64_engine.encode(b"hello");
+       std::env::set_var("CLEF_PRIVEE_RELAI", &invalid_protobuf_b64);
+
+       // --- Actually call the function under test ---
+       let loaded_keypair_result = load_keypair_from_env();
+
+       // Assert the result is Err
+       assert!(loaded_keypair_result.is_err(), "load_keypair_from_env should have failed for invalid protobuf bytes");
+       // Optionally check the error message contains "protobuf" or "decode"
+       let err_msg = loaded_keypair_result.err().unwrap().to_string();
+       assert!(err_msg.contains("protobuf") || err_msg.contains("decode"));
+
+
+       // Clean up environment variable
+       std::env::remove_var("CLEF_PRIVEE_RELAI");
+   }
+
+    #[test]
+   fn test_clef_privée_relai_env_key_loading_not_set() {
+       // Ensure the environment variable is not set
+       std::env::remove_var("CLEF_PRIVEE_RELAI");
+
+       // --- Actually call the function under test ---
+       let loaded_keypair_result = load_keypair_from_env();
+
+       // Assert the result is Ok (should generate a random key)
+       assert!(loaded_keypair_result.is_ok(), "load_keypair_from_env should succeed when env var is not set");
+
+       // We can't easily check if it's *random*, but we know it succeeded.
+       let _loaded_keypair = loaded_keypair_result.unwrap();
    }
 }
 
@@ -255,35 +310,34 @@ impl From<GossipsubEvent> for RelayEvent {
 // Type alias for the shared state of listening addresses
 type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
 
-fn load_keypair_from_env() -> Keypair {
+// Function now returns a Result
+fn load_keypair_from_env() -> Result<Keypair, Box<dyn Error>> {
     match env::var("CLEF_PRIVEE_RELAI") {
         Ok(key_b64) => {
-            match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
-                Ok(key_bytes) => { // key_bytes no longer needs to be mutable
-                    // Attempt to load using protobuf encoding
-                    match Keypair::from_protobuf_encoding(&key_bytes) {
-                        Ok(kp) => {
-                            info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf).");
-                            kp
-                        },
-                        Err(e) => {
-                            warn!("Failed to decode CLEF_PRIVEE_RELAI (protobuf): {}. Generating random identity.", e);
-                            Keypair::generate_ed25519()
-                        }
-                    }
-                },
-                Err(e) => {
-                    warn!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}. Generating random identity.", e);
-                    Keypair::generate_ed25519()
-                }
-            }
+            // Try decoding base64 (standard or no-pad)
+            let key_bytes = base64_engine.decode(key_b64.as_bytes())
+                .or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes()))
+                .map_err(|e| format!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}", e))?; // Return Err on base64 failure
+
+            // Try decoding protobuf
+            let keypair = Keypair::from_protobuf_encoding(&key_bytes)
+                .map_err(|e| format!("Failed to decode CLEF_PRIVEE_RELAI key bytes (protobuf): {}", e))?; // Return Err on protobuf failure
+
+            info!("Successfully loaded identity from CLEF_PRIVEE_RELAI environment variable.");
+            Ok(keypair)
         },
-        Err(_) => {
+        Err(env::VarError::NotPresent) => {
+            // Environment variable not set, generate a new random keypair
             info!("CLEF_PRIVEE_RELAI not set. Generating random identity.");
-            Keypair::generate_ed25519()
+            Ok(Keypair::generate_ed25519())
+        },
+        Err(e) => {
+            // Other error reading environment variable
+            Err(format!("Error reading CLEF_PRIVEE_RELAI environment variable: {}", e).into())
         }
     }
 }
+
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -313,8 +367,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Create shared state for listening addresses
     let listening_addresses: ListeningAddresses = Arc::new(Mutex::new(Vec::new()));
 
-    // Create keypair for the node's identity
-    let local_key = load_keypair_from_env();
+    // Create keypair for the node's identity, handling potential errors
+    let local_key = match load_keypair_from_env() {
+        Ok(kp) => kp,
+        Err(e) => {
+            // Log the specific error and exit
+            error!("Fatal error loading keypair: {}", e);
+            return Err(e); // Propagate the error to exit main
+        }
+    };
 
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
