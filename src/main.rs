@@ -223,16 +223,23 @@ mod tests {
 
        // Extract the raw 32-byte secret key
        // This is tricky as Keypair doesn't directly expose the secret bytes.
-       // We regenerate using ed25519_dalek which DOES expose them.
-       let dalek_signing_key = ed25519_dalek::SigningKey::from_bytes(
-           &original_keypair.to_protobuf_encoding().unwrap()[4..36] // Extract secret bytes from standard encoding (hacky but works for test)
-       );
-       let secret_bytes_32 = dalek_signing_key.to_bytes();
+       // We need to extract them from the standard protobuf encoding.
+       let proto_bytes = original_keypair.to_protobuf_encoding().unwrap();
+       // The secret key is typically bytes 4 to 36 in the standard encoding.
+       let secret_slice = &proto_bytes[4..36];
+       // Convert the slice to a fixed-size array [u8; 32]
+       let secret_array: [u8; 32] = secret_slice.try_into()
+           .expect("Slice from protobuf encoding should be 32 bytes for Ed25519");
+
+       // Now use the fixed-size array with ed25519_dalek if needed, or directly below.
+       // let dalek_signing_key = ed25519_dalek::SigningKey::from_bytes(&secret_array);
+       // let secret_bytes_32 = dalek_signing_key.to_bytes(); // This is just secret_array again
 
        // Create the custom protobuf message
        let private_key_message = identity_proto::PrivateKey {
            r#type: identity_proto::KeyType::Ed25519 as i32,
-           data: Bytes::copy_from_slice(&secret_bytes_32), // Use the 32 raw secret bytes
+           // Convert the fixed-size array (or Bytes) to Vec<u8> as expected by the struct field
+           data: secret_array.to_vec(), // Use the 32 raw secret bytes as a Vec<u8>
        };
 
        // Encode this custom message to protobuf bytes
@@ -351,14 +358,15 @@ fn load_keypair_from_env() -> Result<Keypair, Box<dyn Error>> {
             // 3. Check KeyType and extract raw secret bytes
             match identity_proto::KeyType::try_from(private_key_proto.r#type) {
                 Ok(identity_proto::KeyType::Ed25519) => {
-                    // 4. Try to create Keypair from the raw secret bytes (`data` field)
-                    // Keypair::ed25519_from_bytes expects a mutable slice.
-                    // We need to handle the Bytes type carefully.
-                    // If `private_key_proto.data` is exactly 32 bytes, we can proceed.
+                    // 4. Try to create Keypair from the raw secret bytes (`data` field, which is Vec<u8>)
+                    // Keypair::ed25519_from_bytes expects a mutable slice of 32 bytes.
                     if private_key_proto.data.len() == 32 {
-                        let mut secret_bytes: [u8; 32] = [0; 32];
-                        secret_bytes.copy_from_slice(&private_key_proto.data);
+                        // Try converting the Vec<u8> into a mutable [u8; 32] array.
+                        // This involves copying.
+                        let mut secret_bytes: [u8; 32] = private_key_proto.data.as_slice().try_into()
+                            .map_err(|_| format!("Failed to convert protobuf data Vec<u8> (len {}) to [u8; 32]", private_key_proto.data.len()))?;
 
+                        // Now create the keypair from the mutable array slice
                         let keypair = Keypair::ed25519_from_bytes(&mut secret_bytes)
                             .map_err(|e| format!("Failed to create Ed25519 keypair from extracted protobuf data bytes: {}", e))?;
 
