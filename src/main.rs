@@ -1007,12 +1007,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => warn!("Failed to listen on WebRTC-direct: {}", e),
     }
     
-    // Only add explicit WebRTC IP-based address when no domain is provided
-    if domain_name.is_none() {
-        // Add explicit WebRTC address for our peer ID (helps with discovery)
-        let webrtc_addr: Multiaddr = format!("/ip4/0.0.0.0/udp/0/webrtc-direct/p2p/{}", local_peer_id).parse()?;
-        swarm.add_external_address(webrtc_addr.clone());
-        info!("Added external WebRTC-direct address: {}", webrtc_addr);
+    // Reinstate QUIC v1 listener for Bitswap and WebTransport support
+    match swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?) {
+        Ok(listener_id) => info!("Listening on QUIC v1 with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on QUIC v1: {}", e),
+    }
+    match swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1/webtransport".parse()?) {
+        Ok(listener_id) => info!("Listening on WebTransport with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on WebTransport: {}", e),
     }
 
     // If a domain name is provided, add external addresses for Nginx proxying
@@ -1021,7 +1023,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let wss_addr = format!("/dns4/{}/tcp/443/wss/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
         match wss_addr {
             Ok(addr) => {
-                // Advertise the secure WebSocket address
                 swarm.add_external_address(addr.clone());
                 info!("Advertising WSS address: {}", addr);
             }
@@ -1030,17 +1031,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        // Do NOT advertise plain WebSocket (WS) over port 80 anymore
-        
-        // Also add WebRTC address with domain
-        let webrtc_dns_addr = format!("/dns4/{}/udp/443/webrtc-direct/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
-        match webrtc_dns_addr {
+        // Add QUIC v1 DNS address
+        let quic_addr = format!("/dns4/{}/udp/443/quic-v1/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        match quic_addr {
             Ok(addr) => {
                 swarm.add_external_address(addr.clone());
-                info!("Advertising WebRTC-direct DNS address: {}", addr);
+                info!("Advertising QUIC v1 DNS address: {}", addr);
             }
             Err(e) => {
-                error!("Failed to parse WebRTC-direct DNS address from domain {}: {}", domain, e);
+                error!("Failed to parse QUIC v1 DNS address from domain {}: {}", domain, e);
+            }
+        }
+
+        // Add WebTransport DNS address
+        let wt_addr = format!("/dns4/{}/udp/443/quic-v1/webtransport/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        match wt_addr {
+            Ok(addr) => {
+                swarm.add_external_address(addr.clone());
+                info!("Advertising WebTransport DNS address: {}", addr);
+            }
+            Err(e) => {
+                error!("Failed to parse WebTransport DNS address from domain {}: {}", domain, e);
             }
         }
     } else {
