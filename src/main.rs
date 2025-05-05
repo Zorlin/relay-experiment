@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
 use parking_lot::Mutex;
 use tokio::time::interval;
-use log::{info, error, warn}; // Added warn
+use log::{info, error, warn, LevelFilter};
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use libp2p::dns::tokio::Transport as TokioDnsConfig;
@@ -229,7 +229,7 @@ type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
 async fn main() -> Result<(), Box<dyn Error>> {
     // Load environment variables from .env file, ignore errors (e.g., file not found)
     dotenv().ok();
-    env_logger::init();
+    env_logger::builder().filter_level(LevelFilter::Info).init();
 
     info!("Starting Rust libp2p relay node...");
 
