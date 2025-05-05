@@ -129,6 +129,49 @@ mod tests {
              _ => panic!("Event did not match expected pattern"),
         }
     }
+
+   #[test]
+   fn test_relay_behaviour_construction() {
+       let local_key = Keypair::generate_ed25519();
+       let local_peer_id = PeerId::from(local_key.public());
+       let identify_config = identify::Config::new(
+           "/test-protocol/1.0".to_string(),
+           local_key.public(),
+       );
+
+       let behaviour = RelayBehaviour {
+           relay: relay::Behaviour::new(local_peer_id, Default::default()),
+           ping: ping::Behaviour::new(ping::Config::new()),
+           identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
+       };
+
+       // Basic assertion to ensure the behaviour fields are populated.
+       // More detailed checks might involve inspecting behaviour states if APIs allow,
+       // but often just checking construction is sufficient for a unit test.
+       assert_eq!(behaviour.identify.config().protocol_version, identify_config.protocol_version);
+       // Ping and Relay behaviours don't expose simple config getters in the same way easily.
+       // We rely on the type system and successful construction.
+   }
+
+   #[test]
+   fn test_identify_config_creation() {
+       let local_key = Keypair::generate_ed25519();
+       let public_key = local_key.public();
+       let protocol_version = "/test-identify/1.0".to_string();
+       let agent_version = "test-agent/0.1".to_string();
+
+       let config = identify::Config::new(
+           protocol_version.clone(),
+           public_key.clone(),
+       )
+       .with_agent_version(agent_version.clone());
+
+       assert_eq!(config.protocol_version, protocol_version);
+       assert_eq!(config.public_key, public_key);
+       assert_eq!(config.agent_version, agent_version);
+       // Check default initial delay (adjust if libp2p defaults change)
+       assert_eq!(config.initial_delay, Duration::from_millis(500));
+   }
 }
 
 impl From<ping::Event> for RelayEvent {
