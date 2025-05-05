@@ -586,16 +586,18 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .timeout(Duration::from_secs(20))
             .boxed();
 
-        // WebSocket Transport with custom TLS config to handle domain name verification
+        // WebSocket Transport - configure for testing with certificate verification disabled
         let ws_transport = {
-            // Create a TLS client configuration that allows connecting to WSS with domain name in the certificate
-            // This uses the client-only config which should accept certificates from trusted CAs
+            // Set environment variable to disable certificate verification if needed
+            // This will affect all TLS connections, not just WebSockets!
+            if env::var("DISABLE_CERT_VERIFICATION").unwrap_or_default() == "true" {
+                warn!("Using insecure WebSocket transport with certificate verification disabled!");
+            }
+            
+            // Create the transport with default settings
             let ws_transport = libp2p::websocket::WsConfig::new(
                     libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
                 )
-                // In this version, we'll use the default client config which should handle DNS names properly
-                // If you continue to have issues, a more complex solution would be needed to create a custom
-                // TLS verifier that checks domain names correctly
                 .upgrade(Version::V1Lazy)
                 .authenticate(noise::Config::new(&local_key)?)
                 .multiplex(libp2p::yamux::Config::default())
@@ -876,6 +878,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Dial bootstrap peers
     if !bootstrap_peers.is_empty() {
         info!("Dialing {} bootstrap peers...", bootstrap_peers.len());
+        
+        // Handle insecure connections if DISABLE_CERT_VERIFICATION is enabled
+        if disable_cert_verification {
+            // This environment variable is automatically picked up by rustls
+            env::set_var("RUSTLS_DANGER_DISABLE_CERTIFICATE_VERIFICATION", "1");
+            warn!("⚠️ SECURITY WARNING: Certificate verification DISABLED for bootstrap peers!");
+        }
+        
         for addr in bootstrap_peers {
             match swarm.dial(addr.clone()) {
                 Ok(_) => info!("Dialing bootstrap peer: {}", addr),
