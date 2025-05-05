@@ -7,7 +7,7 @@ license = "MIT" # Or your preferred license
 
 [dependencies]
 libp2p = { version = "0.53", features = ["tokio", "tcp", "identify", "ping", "relay", "macros", "noise", "yamux", "dns", "websocket"] } # Added dns and websocket features
-libp2p-websocket = { version = "0.45", features = ["tokio"] } # Corrected crate name, added websockets transport
+libp2p-websocket = { version = "0.45" } # Removed non-existent "tokio" feature
 tokio = { version = "1", features = ["full"] }
 futures = "0.3"
 dotenvy = "0.15" # Added dotenvy for .env file support
