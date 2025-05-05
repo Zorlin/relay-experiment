@@ -202,9 +202,17 @@ impl From<identify::Event> for RelayEvent {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+// Type alias for the shared state of listening addresses
+type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     info!("Starting Rust libp2p relay node...");
+
+    // Create shared state for listening addresses
+    let listening_addresses: ListeningAddresses = Arc::new(Mutex::new(Vec::new()));
 
     // Create a random keypair for the node's identity
     let local_key = identity::Keypair::generate_ed25519();
@@ -227,17 +235,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Behaviour construction is now handled within the SwarmBuilder closure below.
     // The old 'let behaviour = ...' block has been removed.
 
-    // Build the Swarm using the new builder pattern
-    // Start with the identity, add the executor, configure the transport,
-    // set timeouts/limits, add the behaviour, and build.
-    let mut swarm = SwarmBuilder::with_existing_identity(local_key)
-        .with_tokio()
-        .with_tcp(
-            tcp::Config::default().nodelay(true),
-            noise::Config::new, // Use noise::Config::new directly here
-            libp2p::yamux::Config::default, // Use yamux::Config::default directly here
-        )?
-        // Example: Set connection limits (optional)
+    // Build the transport: Combine TCP and WebSocket, upgrade with Noise and Yamux
+    // Need to handle DNS resolution as well
+    let transport = {
+        let tcp_transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
+            .upgrade(Version::V1Lazy)
+            .authenticate(noise::Config::new(&local_key)?)
+            .multiplex(libp2p::yamux::Config::default())
+            .boxed();
+
+        // Configure Websockets transport - note: libp2p_websockets is used here
+        // The feature name in libp2p crate is 'websocket', but the transport crate is libp2p-websockets
+        let ws_transport = libp2p_websockets::Transport::new()
+            .upgrade(Version::V1Lazy)
+            .authenticate(noise::Config::new(&local_key)?)
+            .multiplex(libp2p::yamux::Config::default())
+            .boxed();
+
+        // Combine TCP and WS transports using OrTransport
+        let combined_transport = tcp_transport.or_transport(ws_transport).boxed();
+
+        // Wrap with DNS resolver
+        dns::tokio::Transport::system(combined_transport).await?
+            .boxed()
+    };
+
+
+    // Build the Swarm using the new builder pattern with the custom transport
+    let mut swarm = SwarmBuilder::with_tokio_executor(transport, {
+             // Behaviour construction closure
+             // identify_config is captured by the closure
+             RelayBehaviour {
+                relay: relay::Behaviour::new(local_peer_id, Default::default()),
+                ping: ping::Behaviour::new(ping::Config::new()),
+                identify: identify::Behaviour::new(identify_config),
+            }
+        }, local_peer_id)
+        // Example: Set connection limits (optional) - moved from transport builder
         // .with_connection_limits(libp2p::connection_limits::ConnectionLimits::default())
         // Example: Set dial concurrency factor (optional)
         // .with_dial_concurrency_factor(std::num::NonZeroU8::new(8).unwrap())
@@ -252,20 +286,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 relay: relay::Behaviour::new(PeerId::from(key.public()), Default::default()),
                 ping: ping::Behaviour::new(ping::Config::new()),
                 identify: identify::Behaviour::new(identify_config), // Use identify_config directly
-            }
-        })?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60))) // Example config
+        // Configure the swarm further (timeouts, etc.)
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
 
     // Define listening addresses
-    // Listen on all interfaces on TCP port 0, which asks the OS for a free port.
+    // Listen on all interfaces for TCP (port 0 asks OS for a free port)
     let listen_addr_tcp = "/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?;
     swarm.listen_on(listen_addr_tcp)?;
 
-    // Listen on QUIC as well (optional, requires enabling the 'quic' feature in Cargo.toml)
-    // let listen_addr_quic = "/ip4/0.0.0.0/udp/0/quic-v1".parse::<Multiaddr>()?;
-    // swarm.listen_on(listen_addr_quic)?;
+    // Listen on all interfaces for WebSocket on the desired port 12345
+    let listen_addr_ws = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
+    swarm.listen_on(listen_addr_ws)?;
+
+    // Clone Arc for the web server task
+    let server_listening_addresses = listening_addresses.clone();
+
+    // Spawn the web server task
+    tokio::spawn(async move {
+        info!("Starting web server on port 8000...");
+
+        // Route for serving index.html at the root
+        let index_html_content = include_str!("index.html"); // Embed index.html content
+        let index_route = warp::path::end() // Match the root path "/"
+            .map(move || warp::reply::html(index_html_content));
+
+        // Route for serving listening addresses at /adresses
+        let addresses_route = warp::path("adresses")
+            .and(warp::get()) // Match GET requests
+            .map(move || {
+                let addrs = server_listening_addresses.lock();
+                // Filter out loopback addresses like the JS example if desired
+                // let public_addrs: Vec<_> = addrs.iter()
+                //     .filter(|a| !a.to_string().starts_with("/ip4/127.0.0.1"))
+                //     .cloned()
+                //     .collect();
+                // warp::reply::json(&public_addrs) // Use this line to filter
+                warp::reply::json(&*addrs) // Serve all addresses for now
+            });
+
+        let routes = index_route.or(addresses_route);
+
+        warp::serve(routes)
+            .run(([0, 0, 0, 0], 8000)) // Listen on all interfaces, port 8000
+            .await;
+    });
 
 
     // Create a periodic timer for status logging
@@ -289,9 +355,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 );
             }
             event = swarm.select_next_some() => {
+                 // Clone Arc for use inside this match arm if needed later
+                 let addresses_for_event = listening_addresses.clone();
                 match event {
                     SwarmEvent::NewListenAddr { address, .. } => {
-                        info!("Listening on: {}", address);
+                        info!("Local node listening on: {}", address);
+                        // Add the new address to our shared list
+                        addresses_for_event.lock().push(address.clone());
+                    }
+                     SwarmEvent::ExpiredListenAddr { address, .. } => {
+                        info!("Local node stopped listening on: {}", address);
+                        // Remove the expired address from our shared list
+                        addresses_for_event.lock().retain(|a| *a != address);
                     }
                     SwarmEvent::Behaviour(RelayEvent::Identify(identify::Event::Received { peer_id, info })) => {
                         info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
