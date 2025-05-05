@@ -1007,14 +1007,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Err(e) => warn!("Failed to listen on WebRTC-direct: {}", e),
     }
     
-    // Reinstate QUIC v1 listener for Bitswap and WebTransport support
-    match swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?) {
-        Ok(listener_id) => info!("Listening on QUIC v1 with listener ID: {:?}", listener_id),
-        Err(e) => warn!("Failed to listen on QUIC v1: {}", e),
+    // Replace ephemeral UDP ports with 443 for QUIC and WebTransport
+    match swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1".parse()?) {
+        Ok(listener_id) => info!("Listening on QUIC v1 (UDP/443) with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on QUIC v1 (UDP/443): {}", e),
     }
-    match swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1/webtransport".parse()?) {
-        Ok(listener_id) => info!("Listening on WebTransport with listener ID: {:?}", listener_id),
-        Err(e) => warn!("Failed to listen on WebTransport: {}", e),
+
+    match swarm.listen_on("/ip4/0.0.0.0/udp/443/quic-v1/webtransport".parse()?) {
+        Ok(listener_id) => info!("Listening on WebTransport (UDP/443) with listener ID: {:?}", listener_id),
+        Err(e) => warn!("Failed to listen on WebTransport (UDP/443): {}", e),
     }
 
     // If a domain name is provided, add external addresses for Nginx proxying
