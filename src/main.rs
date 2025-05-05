@@ -162,7 +162,7 @@ mod tests {
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
            pubsub: Gossipsub::new(
                MessageAuthenticity::Anonymous,
-               ConfigBuilder::from(GossipsubConfig::default()).validation_mode(ValidationMode::Permissive).build()
+               ConfigBuilder::from(GossipsubConfig::default()).validation_mode(ValidationMode::Permissive).build().unwrap()
            ).unwrap(),
        };
 
