@@ -203,7 +203,7 @@ mod tests {
        let local_key = Keypair::generate_ed25519();
        let local_peer_id = PeerId::from(local_key.public());
        let identify_config = identify::Config::new(
-           "/test-protocol/1.0".to_string(),
+           "/test-protocol/1.0.0".to_string(),
            local_key.public(),
        ).with_push_listen_addr_updates(true);
 
@@ -240,7 +240,7 @@ mod tests {
    fn test_identify_config_creation() {
        let local_key = Keypair::generate_ed25519();
        let public_key = local_key.public();
-       let protocol_version = "/test-identify/1.0".to_string();
+       let protocol_version = "/test-identify/1.0.0".to_string();
        let agent_version = "test-agent/0.1".to_string();
 
        let config = identify::Config::new(
@@ -566,7 +566,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
     // Create the Identify behaviour configuration
     let identify_config = identify::Config::new(
-        "/libp2p-relay-rust/identify/1.0.0".to_string(), // More specific protocol name
+        "/ipfs/id/1.0.0".to_string(), // Use default protocol name for compatibility with TypeScript implementation
         local_key.public(),
     )
     .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")))
@@ -575,8 +575,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
     // Note: We can't currently adjust the max message size for identify protocol in this version 
     // (libp2p-identify-0.46.0). This means we'll be limited to the default size (~4KiB).
-    // To avoid protocol confusion with WebRTC (which has a 16KiB limit), we're using a more specific
-    // protocol name format.
+    // We're using the standard protocol name '/ipfs/id/1.0.0' to ensure compatibility
+    // with the TypeScript implementation.
 
     // Build the transport stack
     let transport = {

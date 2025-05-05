@@ -1,0 +1,21 @@
+[package]
+name = "libp2p-identify"
+version = "0.46.0" # Changed to match the version in use
+edition = "2021"
+publish = false
+
+# Dependencies adjusted for v0.46.0
+[dependencies]
+asynchronous-codec = "0.7"
+either = "1.9.0"
+futures = "0.3.30"
+futures-bounded = "0.2.0"
+futures-timer = "3.0.2"
+libp2p-core = "0.43.0"
+libp2p-identity = "0.2.11"
+libp2p-swarm = "0.46.0"
+quick-protobuf = "0.8.0"
+quick-protobuf-codec = "0.3"
+smallvec = "1.15.0"
+thiserror = "2"
+tracing = "0.1.41" 

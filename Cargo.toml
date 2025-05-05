@@ -31,6 +31,10 @@ libp2p-webtransport-websys = "0.5"
 libp2p-autonat = "0.11"
 libp2p-dcutr = "0.12"
 
+# Patch libp2p-identify to increase message size limit
+[patch.crates-io]
+libp2p-identify = { path = "./patches/libp2p-identify" }
+
 [build-dependencies]
 # Add build dependency for prost
 prost-build = "0.13"
