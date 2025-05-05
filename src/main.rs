@@ -9,7 +9,8 @@ use libp2p::{
     /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
-use libp2p_connection_limits::{ConnectionLimits, Behaviour as ConnectionLimitBehaviour};
+use libp2p::connection_limits::ConnectionLimits;
+use libp2p::connection_limits::transport::TransportExt;
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
 use std::collections::{HashMap, HashSet}; // Added for PubSub relayer state
 use std::sync::Arc; // Added Arc
@@ -607,12 +608,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     let swarm = SwarmBuilder::with_existing_identity(local_key) // Use the passed-in key
         .with_tokio()
         .with_other_transport(|_| Ok(transport))? // Pass the built transport
-        .with_behaviour(|_| Ok(ConnectionLimitBehaviour::new(
-            behaviour,
-            ConnectionLimits::default()
-                .with_max_established(Some(500))
-                .with_max_established_per_peer(Some(500))
-        )))? // Wrap in connection‐limits behaviour
+        .with_behaviour(|_| Ok(behaviour))?
         .with_swarm_config(|c| c
             .with_idle_connection_timeout(Duration::from_secs(60))
             // Increase the limit for concurrently negotiating inbound streams significantly
