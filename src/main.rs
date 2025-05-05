@@ -291,6 +291,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Build the Swarm using the standard builder pattern, adding transports
     let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone()) // Use cloned key here
         .with_tokio() // Specify the Tokio executor
+        .with_dns()? // Enable DNS resolution for Multiaddrs *before* transports
         .with_tcp(
             tcp::Config::default().nodelay(true),
             noise::Config::new, // Noise authentication config
@@ -300,7 +301,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             noise::Config::new, // Noise authentication config for WebSocket
             libp2p::yamux::Config::default, // Yamux multiplexing config for WebSocket
         ).await? // Added .await here
-        .with_dns()? // Enable DNS resolution for Multiaddrs
+        // Removed .with_dns()? from here
         .with_behaviour(move |_key| { // Define the behaviour; _key is the identity Keypair
              // We use local_peer_id and identify_config captured from the outer scope.
              RelayBehaviour {
