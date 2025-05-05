@@ -10,6 +10,8 @@ use libp2p::{
 use std::{env, error::Error, time::Duration, str::FromStr};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::fs;
+use std::io::Write;
 use parking_lot::Mutex;
 use tokio::time::interval;
 use log::{info, error, warn, LevelFilter};
@@ -18,9 +20,10 @@ use dotenvy::dotenv;
 use libp2p::dns::tokio::Transport as TokioDnsConfig;
 use libp2p::core::muxing::StreamMuxerBox;
 use base64::{engine::general_purpose::{STANDARD as base64_engine, STANDARD_NO_PAD}, Engine as _};
-use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent};
+use libp2p::gossipsub::{Behaviour as Gossipsub, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent, ValidationMode, Config, ConfigBuilder};
 use prost::Message;
 use bytes::Bytes;
+use rand;
 
 use libp2p_webrtc::tokio::{Transport as WebRtcTransport, Certificate as WebRtcCertificate};
 use libp2p_webtransport_websys::{Transport as WebTransport, Config as WebTransportConfig};
@@ -224,7 +227,7 @@ mod tests {
            identify: identify::Behaviour::new(identify_config.clone()),
            pubsub: Gossipsub::new(
                MessageAuthenticity::Anonymous,
-               ConfigBuilder::from(GossipsubConfig::default()).validation_mode(ValidationMode::Permissive).build().unwrap()
+               ConfigBuilder::from(Config::default()).validation_mode(ValidationMode::Permissive).build().unwrap()
            ).unwrap(),
            dcutr: dcutr::Behaviour::new(local_peer_id),
            autonat: autonat::Behaviour::new(local_peer_id, autonat_config),
@@ -624,10 +627,21 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
 
     // Create the behaviour
     let behaviour = {
+        // Configure GossipSub with parameters similar to the TypeScript implementation
+        let gossipsub_config = libp2p::gossipsub::ConfigBuilder::default()
+            .max_transmit_size(1024 * 1024) // 1MB max message size
+            .heartbeat_interval(Duration::from_secs(20))
+            .validation_mode(ValidationMode::Permissive) // Allow all messages
+            .build()
+            .expect("Valid GossipSub configuration");
+        
+        // Create parameters similar to TypeScript version
         let mut gossipsub = Gossipsub::new(
-            MessageAuthenticity::Signed(local_key.clone()), // Use the passed-in key
-            GossipsubConfig::default(),
+            MessageAuthenticity::Signed(local_key.clone()),
+            gossipsub_config,
         )?;
+        
+        // Subscribe to topics if provided
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
                 let topic = Sha256Topic::new(name.trim());
@@ -639,33 +653,29 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             }
         }
 
-        // Configure the relay behaviour - add missing fields with defaults
+        // Configure the relay behaviour - add unlimited reservations like in TypeScript
         let relay_config = relay::Config {
              max_circuits: 32,
-             max_reservations: usize::MAX,
+             max_reservations: usize::MAX, // Set to unlimited like TypeScript
              reservation_duration: Duration::from_secs(60 * 60), // Default
-             // Provide defaults for missing fields
              max_circuit_duration: Duration::from_secs(2 * 60),
              max_circuit_bytes: 1 << 17, // 128 KiB
              max_reservations_per_peer: 1,
              max_circuits_per_peer: 16,
-             circuit_src_rate_limiters: Default::default(), // Default
-             reservation_rate_limiters: Default::default(), // Default
+             circuit_src_rate_limiters: Default::default(),
+             reservation_rate_limiters: Default::default(),
         };
 
         // Configure AutoNAT
         let autonat_config = autonat::Config { 
-            // Keep defaults, or customize here e.g.:
-            // boot_delay: Duration::from_secs(15),
-            // refresh_interval: Duration::from_secs(30),
-            // throttle_server_period: Duration::ZERO,
+            // Keep defaults, or customize here
             ..Default::default()
         };
 
         RelayBehaviour {
-           relay: relay::Behaviour::new(local_peer_id, relay_config), // Use the configured relay settings
+           relay: relay::Behaviour::new(local_peer_id, relay_config),
            ping: ping::Behaviour::new(ping::Config::new()),
-           identify: identify::Behaviour::new(identify_config), // IdentifyPush enabled in config
+           identify: identify::Behaviour::new(identify_config),
            pubsub: gossipsub,
            dcutr: dcutr::Behaviour::new(local_peer_id),
            autonat: autonat::Behaviour::new(local_peer_id, autonat_config),
@@ -730,6 +740,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
             return Err(e); // Propagate the error to exit main
         }
     };
+
+    // If this was a newly generated keypair, save it to .env file (like TypeScript implementation)
+    if env::var("CLEF_PRIVEE_RELAI").is_err() {
+        match local_key.to_protobuf_encoding() {
+            Ok(key_bytes) => {
+                // Encode to base64
+                let key_b64 = base64_engine.encode(&key_bytes);
+                
+                // Append to .env file
+                if let Err(e) = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(".env")
+                    .and_then(|mut file| writeln!(file, "\nCLEF_PRIVEE_RELAI={}", key_b64)) 
+                {
+                    warn!("Failed to save generated keypair to .env file: {}", e);
+                } else {
+                    info!("New keypair saved to .env file for future use.");
+                }
+            },
+            Err(e) => warn!("Failed to encode keypair for saving to .env: {}", e),
+        }
+    }
 
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
