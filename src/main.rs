@@ -705,20 +705,25 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
     // Create the behaviour
     let behaviour = {
         // Configure GossipSub with parameters similar to the TypeScript implementation
+        // Aligning closer to TS defaults/settings where possible
+        let score_params = libp2p::gossipsub::PeerScoreParams {
+            ip_colocation_factor_weight: 0.0, // Match TS: disable IP colocation penalty
+            ..Default::default()
+        };
+
         let gossipsub_config = libp2p::gossipsub::ConfigBuilder::default()
-            .max_transmit_size(1024 * 1024) // 1MB max message size - matches TS's 1e6
-            .heartbeat_interval(Duration::from_secs(20))
-            .validation_mode(ValidationMode::Permissive) // Allow all messages - equivalent to canRelayMessage=true
-            .mesh_outbound_min(2) // Ensure outbound connections for proper relay - REVERTED FROM 0
-            .mesh_n_low(0) // Lower threshold for mesh maintenance - TRYING 0
-            .allow_self_origin(true) // Allow receiving our own messages
-            .duplicate_cache_time(Duration::from_secs(1)) // Shorter duplicate cache to avoid missing messages
-            // Note: The Rust implementation doesn't have direct equivalents for allowPublishToZeroTopicPeers
-            // but we can ensure better relaying by configuring more mesh parameters:
-            .mesh_n(8) // Aim for this many peers in each topic's mesh (equivalent to D in GossipSubParams)
-            .fanout_ttl(Duration::from_secs(60)) // Keep fanout peers for topics we publish but don't subscribe to
-            .gossip_lazy(6) // Number of non-mesh peers to send gossip to
-            .gossip_factor(0.25) // Percentage of peers to send gossip to each heartbeat
+            .max_transmit_size(1024 * 1024) // Keep this, matched TS 1e6 approx and fixed earlier issues
+            // .heartbeat_interval(Duration::from_secs(20)) // Use Rust default (1s, matches TS default)
+            .validation_mode(ValidationMode::Permissive) // Matches TS `canRelayMessage: true`
+            // .mesh_outbound_min(2) // Use Rust default (likely closer to TS default Dout=6 than our previous 2)
+            // .mesh_n_low(2) // Use Rust default (likely closer to TS default Dlo=6 than our previous 2)
+            // .allow_self_origin(true) // Use Rust default
+            // .duplicate_cache_time(Duration::from_secs(1)) // Use Rust default (likely closer to TS default 120s)
+            .mesh_n(8) // Keep matching TS default D=8
+            .fanout_ttl(Duration::from_secs(60)) // Keep matching TS default 60s
+            .gossip_lazy(6) // Keep matching TS default D_lazy=6
+            .gossip_factor(0.25) // Keep matching TS default 0.25
+            .peer_score_params(score_params) // Explicitly set score params matching TS
             .build()
             .expect("Valid GossipSub configuration");
         
