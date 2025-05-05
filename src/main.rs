@@ -36,6 +36,102 @@ impl From<relay::Event> for RelayEvent {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libp2p::{
+        ping, relay, identify,
+        identity::Keypair,
+        PeerId, Multiaddr,
+        swarm::ConnectionId,
+        core::Endpoint,
+    };
+
+    // Helper to create a dummy PeerId for testing
+    fn dummy_peer_id() -> PeerId {
+        PeerId::from(Keypair::generate_ed25519().public())
+    }
+
+    // Helper to create a dummy Multiaddr for testing
+    fn dummy_multiaddr() -> Multiaddr {
+        "/ip4/127.0.0.1/tcp/0".parse().unwrap()
+    }
+
+    #[test]
+    fn test_from_relay_event() {
+        let peer_id = dummy_peer_id();
+        let relay_event = relay::Event::CircuitReq {
+            src_peer_id: peer_id,
+            src_relay_addr: dummy_multiaddr(),
+            max_circuit_duration: Duration::from_secs(10),
+            max_circuit_bytes: 1024,
+            limited_relay: false, // Added field
+            reservation: None, // Added field
+        };
+        let event: RelayEvent = relay_event.into();
+        assert!(matches!(event, RelayEvent::Relay(relay::Event::CircuitReq { .. })));
+    }
+
+    #[test]
+    fn test_from_ping_event() {
+        let peer_id = dummy_peer_id();
+        let ping_event = ping::Event {
+            peer: peer_id,
+            connection: ConnectionId::new_unchecked(0), // Use new_unchecked for simplicity in test
+            result: Result::Ok(ping::Success::Ping { rtt: Duration::from_millis(10) }),
+        };
+        let event: RelayEvent = ping_event.into();
+        assert!(matches!(event, RelayEvent::Ping(ping::Event { .. })));
+    }
+
+    #[test]
+    fn test_from_identify_event() {
+        let peer_id = dummy_peer_id();
+        let public_key = Keypair::generate_ed25519().public();
+        let identify_event = identify::Event::Received {
+            peer_id,
+            info: identify::Info {
+                public_key,
+                protocol_version: "test/1.0".to_string(),
+                agent_version: "test-agent/0.1".to_string(),
+                listen_addrs: vec![dummy_multiaddr()],
+                protocols: vec!["/test/1".into()],
+                observed_addr: dummy_multiaddr(),
+            },
+            connection: ConnectionId::new_unchecked(0), // Added field
+        };
+        let event: RelayEvent = identify_event.into();
+        assert!(matches!(event, RelayEvent::Identify(identify::Event::Received { .. })));
+    }
+
+    // Example test for a SwarmEvent pattern match (demonstrates structure, not a real unit test)
+    // This kind of test is more suited for integration tests where a real Swarm exists.
+    #[test]
+    fn test_swarm_event_match_structure() {
+        let peer_id = dummy_peer_id();
+        let dummy_endpoint = libp2p::core::ConnectedPoint::Listener {
+             local_addr: dummy_multiaddr(),
+             send_back_addr: dummy_multiaddr(),
+        };
+        let event = SwarmEvent::ConnectionEstablished {
+            peer_id,
+            connection_id: ConnectionId::new_unchecked(0),
+            endpoint: dummy_endpoint,
+            failed_addresses: &[],
+            other_established: 0,
+        };
+
+        match event {
+             SwarmEvent::ConnectionEstablished { peer_id: p, endpoint: e, .. } => {
+                 assert_eq!(p, peer_id);
+                 assert!(matches!(e, libp2p::core::ConnectedPoint::Listener{..}));
+             },
+             _ => panic!("Event did not match expected pattern"),
+        }
+    }
+}
+
 impl From<ping::Event> for RelayEvent {
     fn from(event: ping::Event) -> Self {
         RelayEvent::Ping(event)
