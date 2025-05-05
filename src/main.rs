@@ -18,7 +18,7 @@ use log::{info, error, warn, LevelFilter};
 use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use libp2p::dns::tokio::Transport as TokioDnsConfig;
-use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
+use base64::{engine::general_purpose::{STANDARD as base64_engine, STANDARD_NO_PAD}, Engine as _}; // Added base64 imports
 use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Sha256Topic, Event as GossipsubEvent}; // Updated PubSub imports
 
 
@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Create keypair for the node's identity
     let local_key = match private_key_base64 {
         Ok(key_b64) => {
-            match base64_engine.decode(key_b64.as_bytes()) {
+            match base64_engine.decode(key_b64.as_bytes()).or_else(|_| STANDARD_NO_PAD.decode(key_b64.as_bytes())) {
                 Ok(key_bytes) => {
                     match Keypair::from_protobuf_encoding(&key_bytes) { // Corrected function name
                         Ok(keypair) => {
