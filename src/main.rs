@@ -66,7 +66,7 @@ mod tests {
         // Removed relay::client import
     };
     use std::num::NonZeroU32; // Import NonZeroU32
-    use libp2p::gossipsub::ValidationMode; // Allow permissive validation for Anonymous pubsub in tests
+    use libp2p::gossipsub::{ValidationMode, ConfigBuilder}; // Allow permissive validation for Anonymous pubsub in tests
 
     // Helper to create a dummy PeerId for testing
     fn dummy_peer_id() -> PeerId {
@@ -162,7 +162,7 @@ mod tests {
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
            pubsub: Gossipsub::new(
                MessageAuthenticity::Anonymous,
-               GossipsubConfig::default().validation_mode(ValidationMode::Permissive)
+               GossipsubConfig::builder().validation_mode(ValidationMode::Permissive).build()
            ).unwrap(),
        };
 
