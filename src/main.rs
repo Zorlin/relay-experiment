@@ -288,6 +288,7 @@ mod tests {
    }
 
     #[test]
+    #[serial] // Run this test serially
    fn test_clef_privée_relai_env_key_loading_invalid_protobuf() {
        // Set valid base64, but invalid protobuf data (e.g., just "hello")
        let invalid_protobuf_b64 = base64_engine.encode(b"hello");
@@ -308,6 +309,7 @@ mod tests {
    }
 
     #[test]
+    #[serial] // Run this test serially
    fn test_clef_privée_relai_env_key_loading_not_set() {
        // Ensure the environment variable is not set
        std::env::remove_var("CLEF_PRIVEE_RELAI");
