@@ -18,7 +18,7 @@ use warp::Filter;
 use dotenvy::dotenv; // Added dotenvy import
 use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
 use libp2p::gossipsub::{Behaviour as Gossipsub, Config as GossipsubConfig, MessageAuthenticity, Topic, Event as GossipsubEvent}; // Updated PubSub imports
-use libp2p::gossipsub::topic::Sha256Hash; // Hasher import for PubSub topics
+use libp2p::gossipsub::TopicHash; // gossipsub TopicHash type
 
 
 // Define the network behaviour combining multiple protocols
@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ).unwrap();
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
-                let topic = Topic::<Sha256Hash>::new(name.trim());
+                let topic = Topic::new(name.trim());
                 let _ = gossipsub.subscribe(&topic);
             }
         }
@@ -462,7 +462,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         // Remove the expired address from our shared list
                         addresses_for_event.lock().retain(|a| *a != address);
                     }
-                    SwarmEvent::Behaviour(RelayEvent::Identify(identify::Event::Received { peer_id, info })) => {
+                    SwarmEvent::Behaviour(RelayEvent::Identify(identify::Event::Received { peer_id, info, .. })) => {
                         info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
                         // Add addresses observed by Identify to the Swarm's address book
                         for addr in info.listen_addrs {
