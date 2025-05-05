@@ -1395,6 +1395,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                                 info!("ORBITER MESSAGE CONTENT: {}", String::from_utf8_lossy(&message.data));
                                             }
                                             
+                                            // Log raw content specifically for Orbiter discovery topics
+                                            if message.topic.as_str() == orbiter_disc_topic.hash().as_str() ||
+                                               message.topic.as_str() == orbiter_content_topic.hash().as_str() {
+                                                info!(
+                                                    "ORBITER DISCOVERY MESSAGE RAW CONTENT ({} bytes) on topic {}: {}",
+                                                    message.data.len(), message.topic, String::from_utf8_lossy(&message.data)
+                                                );
+                                            }
+                                            
                                             // Try to parse peer information
                                             if let Ok(peers_info) = serde_json::from_slice::<Vec<SerializablePeer>>(&message.data) {
                                                 for serializable_peer in peers_info {
