@@ -345,7 +345,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
                 let topic = TopicHash::from_raw(name.trim());
-                let _ = gossipsub.subscribe(&topic);
+                let _ = gossipsub.subscribe_hash(&topic);
             }
         }
         RelayBehaviour {
