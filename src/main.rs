@@ -300,8 +300,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .multiplex(libp2p::yamux::Config::default())
             .boxed();
 
-        // Configure Websocket transport (using the corrected libp2p_websocket crate)
-        let ws_transport = websocket::Transport::new() // Removed ::tokio::
+        // Configure Websocket transport using the libp2p re-export
+        let ws_transport = libp2p::websocket::Transport::new() // Use libp2p::websocket::Transport
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -316,19 +316,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
 
-    // Build the Swarm using the standard builder pattern
-    let mut swarm = SwarmBuilder::with_existing_identity(local_key) // Start with identity
-        .with_tokio() // Specify the executor
-        .with_transport(transport)? // Provide the custom transport
-        .with_behaviour(move |_key| { // Define the behaviour
-            // _key is the Keypair passed to with_existing_identity.
-            // We use local_peer_id and identify_config captured from the outer scope.
-            RelayBehaviour {
-                relay: relay::Behaviour::new(local_peer_id, Default::default()),
-                ping: ping::Behaviour::new(ping::Config::new()),
-                identify: identify::Behaviour::new(identify_config), // Use identify_config directly
-            }
-        })? // Behaviour construction can fail
+    // Build the Swarm using the pre-built transport and behaviour
+    let mut swarm = SwarmBuilder::with_transport_and_behaviour(
+            transport, // Provide the custom transport
+            { // Define the behaviour directly here
+                // We use local_peer_id and identify_config captured from the outer scope.
+                RelayBehaviour {
+                    relay: relay::Behaviour::new(local_peer_id, Default::default()),
+                    ping: ping::Behaviour::new(ping::Config::new()),
+                    identify: identify::Behaviour::new(identify_config), // Use identify_config directly
+                }
+            },
+            local_peer_id // Provide the peer ID
+        )
+        .with_tokio_executor() // Specify the executor
         // Configure the swarm further (timeouts, limits, etc.)
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build(); // Finalize the swarm build
