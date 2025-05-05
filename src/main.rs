@@ -73,12 +73,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
 
 
-    // Create the network behaviour
-    let behaviour = RelayBehaviour {
-        relay: relay::Behaviour::new(local_peer_id, Default::default()),
-        ping: ping::Behaviour::new(ping::Config::new()),
-        identify: identify::Behaviour::new(identify_config),
-    };
+    // Behaviour construction is now handled within the SwarmBuilder closure below.
+    // The old 'let behaviour = ...' block has been removed.
 
     // Build the Swarm using the new builder pattern
     // Start with the identity, add the executor, configure the transport,
