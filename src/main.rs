@@ -158,7 +158,11 @@ mod tests {
            relay: relay::Behaviour::new(local_peer_id, Default::default()),
            ping: ping::Behaviour::new(ping::Config::new()),
            identify: identify::Behaviour::new(identify_config.clone()), // Clone config for assertion
-           pubsub: Gossipsub::new(MessageAuthenticity::Anonymous, GossipsubConfig::default()).unwrap(),
+           pubsub: Gossipsub::new(
+               MessageAuthenticity::Anonymous,
+               GossipsubConfig::default()
+                   .with_validation_mode(libp2p::gossipsub::ValidationMode::Permissive)
+           ).unwrap(),
        };
 
        // Basic assertion to ensure the behaviour fields are populated.
