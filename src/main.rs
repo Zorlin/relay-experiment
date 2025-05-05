@@ -344,7 +344,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         ).unwrap();
         if let Some(topics_str) = &pubsub_topics {
             for name in topics_str.split(',') {
-                let topic = Topic::new(name.trim());
+                let topic = Topic::<Sha256Hash>::new(name.trim());
                 let _ = gossipsub.subscribe(&topic);
             }
         }
