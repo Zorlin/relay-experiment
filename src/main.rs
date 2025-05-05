@@ -618,7 +618,12 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
-            .multiplex(libp2p::yamux::Config::default())
+            .multiplex({
+                let mut config = libp2p::yamux::Config::default();
+                config.set_max_buffer_size(16 * 1024 * 1024); // 16 MiB
+                config.set_max_num_streams(2048); // Up from default 256
+                config
+            })
             .timeout(Duration::from_secs(20))
             .boxed();
 
@@ -649,7 +654,12 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             libp2p::websocket::WsConfig::new(dns_tcp)
                 .upgrade(Version::V1Lazy)
                 .authenticate(noise::Config::new(&local_key)?)
-                .multiplex(libp2p::yamux::Config::default())
+                .multiplex({
+                    let mut config = libp2p::yamux::Config::default();
+                    config.set_max_buffer_size(16 * 1024 * 1024); // 16 MiB
+                    config.set_max_num_streams(2048); // Up from default 256
+                    config
+                })
                 .timeout(Duration::from_secs(20))
                 .boxed()
         };
@@ -699,7 +709,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             .max_transmit_size(1024 * 1024) // 1MB max message size - matches TS's 1e6
             .heartbeat_interval(Duration::from_secs(20))
             .validation_mode(ValidationMode::Permissive) // Allow all messages - equivalent to canRelayMessage=true
-            .mesh_outbound_min(0) // Ensure outbound connections for proper relay - TRYING 0
+            .mesh_outbound_min(2) // Ensure outbound connections for proper relay - REVERTED FROM 0
             .mesh_n_low(0) // Lower threshold for mesh maintenance - TRYING 0
             .allow_self_origin(true) // Allow receiving our own messages
             .duplicate_cache_time(Duration::from_secs(1)) // Shorter duplicate cache to avoid missing messages
@@ -1602,7 +1612,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     peer_info_json.as_bytes(),
                                 ) {
                                     Ok(_) => info!("Published peer discovery info on topic {}", topic),
-                                    Err(e) => error!("Failed to publish peer discovery info on topic {}: {}", topic, e),
+                                    // Changed from error! to warn!
+                                    Err(e) => warn!("Failed to publish peer discovery info on topic {}: {}", topic, e),
                                 }
                             }
                         } else {
