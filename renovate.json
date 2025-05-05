@@ -1,0 +1,26 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:base"],
+  "packageRules": [
+    {
+      "matchDepTypes": ["devDependencies"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "matchPackagePatterns": ["^actions/"],
+      "automerge": true
+    },
+    {
+      "description": "Regrouper les librairies @libp2p.",
+      "groupName": "Libp2p",
+      "groupSlug": "libp2p",
+      "matchDatasources": ["npm"],
+      "matchPackageNames": ["@libp2p/**", "@chainsafe/**", "libp2p"]
+    }
+  ]
+}

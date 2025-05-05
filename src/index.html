@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Point de relai</title>
+  <link rel="shortcut icon" href="https://libp2p.io/img/favicon.png" type="image/png">
+  <style>
+    body {
+      font-family: sans-serif;
+    }
+
+    tt {
+      background: #AFAFAF;
+      padding: 4px;
+      border-radius: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <center>
+    <br>
+    <img src="https://raw.githubusercontent.com/libp2p/libp2p/master/logo/white-bg-1.png" alt="Libp2p Logo" width="128" />
+    <h2>Ceci est un nœud de relai libp2p</h2>
+    <p>Ce point de relai vous permet de faciliter la découverte et la connection des pairs<br>sur navigateur du réseau libp2p.</p>  
+    <div id="msg"><p>En attente des adresses...</p></div>
+  </center>
+  <div id="adr"></div>
+  <center>
+    <p><a href="https://github.com/libp2p/js-libp2p-example-circuit-relay#readme"> » En savoir plus</a></p>
+  </center>
+</body>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/languages/javascript.min.js"></script>
+
+<script>
+const obtAdresses = async () => {
+  const réponse = await fetch("/adresses");
+  const adresses = await réponse.json();
+  return adresses
+}
+obtAdresses().then(
+  (adresses) => {
+    const https = window.location.protocol === "https:"
+    const adressesPubliques = adresses.filter(a=>!a.startsWith("/ip4/127.0.0.1"))
+    document.getElementById('msg').innerHTML = `<p>Vous pouvez inclure ce point de relai dans vos applis avec la configuration libp2p suivante :</p>`
+    document.getElementById('adr').innerHTML = `
+<pre><code class="language-javascript" style="margin: 0 auto; min-width: 60%; max-width: 550px;">
+{
+  peerDiscovery: [
+    bootstrap({
+      list: ${JSON.stringify(adressesPubliques, undefined, 2)},
+    }),
+  ],
+}
+</code></pre>
+`
+hljs.highlightAll();
+});
+
+</script>
