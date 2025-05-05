@@ -447,6 +447,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Create a periodic timer for status logging
     let mut status_interval = interval(Duration::from_secs(30));
+    // Initial status log to avoid waiting for first interval tick
+    {
+        let info = swarm.network_info();
+        let counters = info.connection_counters();
+        let peers: Vec<_> = swarm.connected_peers().cloned().collect();
+        info!(
+            "Initial Status: Connected Peers: {} {:?}, Connections: {{ pending_in: {}, pending_out: {}, established_in: {}, established_out: {}, established: {} }}",
+            peers.len(),
+            peers,
+            counters.num_pending_incoming(),
+            counters.num_pending_outgoing(),
+            counters.num_established_incoming(),
+            counters.num_established_outgoing(),
+            counters.num_established()
+        );
+    }
 
     // Main event loop
     loop {
