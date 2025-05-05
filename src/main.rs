@@ -1,20 +1,21 @@
 use futures::stream::StreamExt;
 use libp2p::{
     core::transport::upgrade::Version, // Needed for Websocket upgrade
-    identity,
+    identity::{self, Keypair}, // Explicitly import Keypair
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, Multiaddr, PeerId, SwarmBuilder, Transport, // Added Transport trait back
-    dns, // Added dns for resolving potentially passed multiaddrs
-    websocket_websys, // Added websocket transport (even though named websys, works server-side too)
+    tcp, Multiaddr, PeerId, SwarmBuilder, Transport,
+    dns,
+    websocket, // Corrected websocket import
 };
-use std::error::Error;
-use std::time::Duration;
+use std::{env, error::Error, time::Duration}; // Added env for environment variables
 use std::sync::Arc; // Added Arc
-use parking_lot::Mutex; // Using parking_lot::Mutex for better async performance
+use parking_lot::Mutex;
 use tokio::time::interval;
-use log::{info, error};
-use warp::Filter; // Added warp import
+use log::{info, error, warn}; // Added warn
+use warp::Filter;
+use dotenvy::dotenv; // Added dotenvy import
+use base64::{engine::general_purpose::STANDARD as base64_engine, Engine as _}; // Added base64 imports
 
 // Define the network behaviour combining multiple protocols
 #[derive(NetworkBehaviour)]
@@ -208,17 +209,70 @@ async fn main() -> Result<(), Box<dyn Error>> {
 // Type alias for the shared state of listening addresses
 type ListeningAddresses = Arc<Mutex<Vec<Multiaddr>>>;
 
-#[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // Load environment variables from .env file, ignore errors (e.g., file not found)
+    dotenv().ok();
     env_logger::init();
 
     info!("Starting Rust libp2p relay node...");
 
+    // --- Configuration Loading ---
+    let private_key_base64 = env::var("CLEF_PRIVEE_RELAI");
+    let domain_name = env::var("DOMAINE").ok(); // Optional domain name
+    let pubsub_topics = env::var("RELAY_PUBSUB_PEER_DISCOVERY_TOPICS").ok(); // Optional pubsub topics
+
+    // Log the loaded optional config
+    if let Some(domain) = &domain_name {
+        info!("Using domain: {}", domain);
+    } else {
+        info!("No DOMAINE environment variable found.");
+    }
+    if let Some(topics) = &pubsub_topics {
+        info!("PubSub discovery topics configured: {}", topics);
+        // TODO: Use these topics when pubsub is implemented
+    } else {
+        info!("No RELAY_PUBSUB_PEER_DISCOVERY_TOPICS environment variable found.");
+    }
+
     // Create shared state for listening addresses
     let listening_addresses: ListeningAddresses = Arc::new(Mutex::new(Vec::new()));
 
-    // Create a random keypair for the node's identity
-    let local_key = identity::Keypair::generate_ed25519();
+    // Create keypair for the node's identity
+    let local_key = match private_key_base64 {
+        Ok(key_b64) => {
+            match base64_engine.decode(key_b64.as_bytes()) {
+                Ok(key_bytes) => {
+                    match Keypair::try_from_protobuf_encoding(&key_bytes) { // Try decoding from protobuf first (common format)
+                        Ok(keypair) => {
+                            info!("Loaded identity from CLEF_PRIVEE_RELAI (protobuf).");
+                            keypair
+                        },
+                        Err(_) => { // If protobuf fails, try Ed25519 secret key bytes directly
+                            match Keypair::ed25519_from_bytes(key_bytes) {
+                                Ok(keypair) => {
+                                    info!("Loaded identity from CLEF_PRIVEE_RELAI (Ed25519 bytes).");
+                                    keypair
+                                },
+                                Err(e) => {
+                                    warn!("Failed to decode CLEF_PRIVEE_RELAI as Ed25519 key: {}. Generating random identity.", e);
+                                    Keypair::generate_ed25519()
+                                }
+                            }
+                        }
+                    }
+                },
+                Err(e) => {
+                    warn!("Failed to decode CLEF_PRIVEE_RELAI from base64: {}. Generating random identity.", e);
+                    Keypair::generate_ed25519()
+                }
+            }
+        },
+        Err(_) => {
+            info!("CLEF_PRIVEE_RELAI not set. Generating random identity.");
+            Keypair::generate_ed25519()
+        }
+    };
+
     let local_peer_id = PeerId::from(local_key.public());
     info!("Local peer ID: {}", local_peer_id);
 
@@ -247,9 +301,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .multiplex(libp2p::yamux::Config::default())
             .boxed();
 
-        // Configure Websockets transport - note: libp2p_websockets is used here
-        // The feature name in libp2p crate is 'websocket', but the transport crate is libp2p-websockets
-        let ws_transport = libp2p_websockets::Transport::new()
+        // Configure Websocket transport (using the corrected libp2p_websocket crate)
+        let ws_transport = websocket::tokio::Transport::new()
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -300,8 +353,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.listen_on(listen_addr_tcp)?;
 
     // Listen on all interfaces for WebSocket on the desired port 12345
-    let listen_addr_ws = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
-    swarm.listen_on(listen_addr_ws)?;
+    let listen_addr_ws_ip = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
+    swarm.listen_on(listen_addr_ws_ip)?;
+
+    // If a domain name is provided, also try listening on a DNS address.
+    // This helps ensure the address is advertised correctly via Identify.
+    if let Some(domain) = &domain_name {
+        // Use dns4 for IPv4 or dns6 for IPv6, or just dns if agnostic
+        let listen_addr_ws_dns = format!("/dns4/{}/tcp/12345/ws", domain).parse::<Multiaddr>();
+        match listen_addr_ws_dns {
+            Ok(addr) => {
+                if let Err(e) = swarm.listen_on(addr.clone()) {
+                    // Log error if listening on DNS fails, but continue anyway
+                    error!("Failed to listen on DNS address {}: {}", addr, e);
+                }
+            }
+            Err(e) => {
+                 error!("Failed to parse DNS address from domain {}: {}", domain, e);
+            }
+        }
+    }
+
 
     // Clone Arc for the web server task
     let server_listening_addresses = listening_addresses.clone();
