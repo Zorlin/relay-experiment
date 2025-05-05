@@ -342,6 +342,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 relay: relay::Behaviour::new(PeerId::from(key.public()), Default::default()),
                 ping: ping::Behaviour::new(ping::Config::new()),
                 identify: identify::Behaviour::new(identify_config), // Use identify_config directly
+            } // <-- Added closing brace for RelayBehaviour struct literal
+        }) // <-- Added closing parenthesis for .with_behaviour() call
         // Configure the swarm further (timeouts, etc.)
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
