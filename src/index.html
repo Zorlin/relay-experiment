@@ -29,6 +29,7 @@
   </center>
   <div id="adr"></div>
   <center>
+    <div id="topics"><p>En attente des sujets...</p></div> <!-- Added div for topics -->
     <p><a href="https://github.com/libp2p/js-libp2p-example-circuit-relay#readme"> » En savoir plus</a></p>
   </center>
 </body>
@@ -38,16 +39,24 @@
 <script src="https://unpkg.com/@highlightjs/cdn-assets@11.9.0/languages/javascript.min.js"></script>
 
 <script>
-const obtAdresses = async () => {
-  const réponse = await fetch("/adresses");
-  const adresses = await réponse.json();
-  return adresses
-}
-obtAdresses().then(
-  (adresses) => {
-    const https = window.location.protocol === "https:"
-    const adressesPubliques = adresses.filter(a=>!a.startsWith("/ip4/127.0.0.1"))
-    document.getElementById('msg').innerHTML = `<p>Vous pouvez inclure ce point de relai dans vos applis avec la configuration libp2p suivante :</p>`
+// Function to fetch data from an endpoint
+const fetchData = async (endpoint) => {
+  const response = await fetch(endpoint);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch ${endpoint}: ${response.statusText}`);
+  }
+  return await response.json();
+};
+
+// Fetch both addresses and topics concurrently
+Promise.all([
+  fetchData("/adresses"),
+  fetchData("/topics")
+]).then(([adresses, topics]) => {
+    // --- Address Handling (same as before) ---
+    const https = window.location.protocol === "https:";
+    const adressesPubliques = adresses.filter(a => !a.startsWith("/ip4/127.0.0.1"));
+    document.getElementById('msg').innerHTML = `<p>Vous pouvez inclure ce point de relai dans vos applis avec la configuration libp2p suivante :</p>`;
     document.getElementById('adr').innerHTML = `
 <pre><code class="language-javascript" style="margin: 0 auto; min-width: 60%; max-width: 550px;">
 {
@@ -58,8 +67,31 @@ obtAdresses().then(
   ],
 }
 </code></pre>
-`
-hljs.highlightAll();
+`;
+
+    // --- Topic Handling ---
+    const topicsDiv = document.getElementById('topics');
+    if (topics && topics.length > 0) {
+      let topicsHtml = '<h3>Sujets PubSub actuellement relayés :</h3><ul>';
+      topics.forEach(topic => {
+        // Escape topic string to prevent potential XSS if topic names could contain HTML
+        const escapedTopic = document.createElement('div');
+        escapedTopic.textContent = topic;
+        topicsHtml += `<li><tt>${escapedTopic.innerHTML}</tt></li>`;
+      });
+      topicsHtml += '</ul>';
+      topicsDiv.innerHTML = topicsHtml;
+    } else {
+      topicsDiv.innerHTML = '<p>Aucun sujet PubSub n\'est actuellement relayé (ou la liste est vide).</p>';
+    }
+
+    // Highlight the code block after content is set
+    hljs.highlightAll();
+
+}).catch(error => {
+  console.error("Error fetching data:", error);
+  document.getElementById('msg').innerHTML = `<p style="color: red;">Erreur lors de la récupération des données du relai.</p>`;
+  document.getElementById('topics').innerHTML = ''; // Clear topics section on error
 });
 
 </script>
