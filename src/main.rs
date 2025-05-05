@@ -1,5 +1,5 @@
 use futures::stream::StreamExt;
-use futures::stream::StreamExt;
+// Removed duplicate import
 use libp2p::{
     core::upgrade,
     identity,
@@ -70,6 +70,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .boxed();
 
     // Create the Identify behaviour configuration
+    // Note: The Identify protocol ID is now recommended to be just "/ipfs/id/1.0.0"
+    // but we keep the custom one for now.
     let identify_config = identify::Config::new(
         "/libp2p-relay-rust/0.1.0".to_string(),
         local_key.public(),
@@ -84,8 +86,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
         identify: identify::Behaviour::new(identify_config),
     };
 
-    // Build the Swarm
-    let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id).build();
+    // Build the Swarm using the new builder pattern
+    // Start with the identity, add the executor, configure the transport,
+    // set timeouts/limits, add the behaviour, and build.
+    let mut swarm = SwarmBuilder::with_existing_identity(local_key)
+        .with_tokio()
+        .with_tcp(
+            tcp::Config::default().nodelay(true),
+            noise::Config::new, // Use noise::Config::new directly here
+            libp2p::yamux::Config::default, // Use yamux::Config::default directly here
+        )?
+        // Example: Set connection limits (optional)
+        // .with_connection_limits(libp2p::connection_limits::ConnectionLimits::default())
+        // Example: Set dial concurrency factor (optional)
+        // .with_dial_concurrency_factor(std::num::NonZeroU8::new(8).unwrap())
+        .with_behaviour(|key| {
+            // The behaviour construction might need the keypair now,
+            // although our current RelayBehaviour doesn't directly use it in its constructor.
+            // We pass the peer_id derived earlier.
+             RelayBehaviour {
+                relay: relay::Behaviour::new(PeerId::from(key.public()), Default::default()),
+                ping: ping::Behaviour::new(ping::Config::new()),
+                identify: identify::Behaviour::new(identify_config), // identify_config created earlier
+            }
+        })?
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60))) // Example config
+        .build();
+
 
     // Define listening addresses
     // Listen on all interfaces on TCP port 0, which asks the OS for a free port.
