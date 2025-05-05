@@ -1,0 +1,3 @@
+[submodule "relai-libp2p"]
+	path = relai-libp2p
+	url = https://github.com/reseau-constellation/relai-libp2p
