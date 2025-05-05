@@ -316,7 +316,7 @@ mod tests {
        let loaded_keypair_result = load_keypair_from_env();
 
        // Assert the result is Ok (should generate a random key)
-       assert!(loaded_keypair_result.is_ok(), "load_keypair_from_env should succeed when env var is not set");
+       assert!(loaded_keypair_result.is_ok(), "load_keypair_from_env should succeed when env var is not set, but got Err: {:?}", loaded_keypair_result.err());
 
        // We can't easily check if it's *random*, but we know it succeeded.
        let _loaded_keypair = loaded_keypair_result.unwrap();
