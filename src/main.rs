@@ -4,8 +4,8 @@ use libp2p::{
     identity::{Keypair},
     noise, ping, relay, identify,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, Multiaddr, PeerId, SwarmBuilder, Transport,
-    dns, // Added back dns import
+    /* Removed unused tcp import */ Multiaddr, PeerId, SwarmBuilder, Transport,
+    /* Removed unused dns import */
     // Removed unused websocket import, access via libp2p::websocket
 };
 use std::{env, error::Error, time::Duration}; // Added env for environment variables
@@ -298,8 +298,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .timeout(Duration::from_secs(20)) // Add connection timeout
             .boxed();
 
-        // Create WebSocket transport
-        let ws_transport = libp2p::websocket::Transport::new()
+        // Create WebSocket transport using WsConfig
+        let ws_transport = libp2p::websocket::WsConfig::new() // Use WsConfig::new()
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
             .multiplex(libp2p::yamux::Config::default())
@@ -325,7 +325,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Build the Swarm using the manually constructed transport and behaviour
-    let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id)
+    let mut swarm = SwarmBuilder::new(transport, behaviour, local_peer_id) // Use SwarmBuilder::new
+        .with_tokio_executor() // Specify the executor after .new()
         // Configure the swarm further (timeouts, limits, etc.)
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build(); // Finalize the swarm build
