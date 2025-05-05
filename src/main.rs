@@ -376,6 +376,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Listen on all interfaces for both raw TCP and WebSocket on port 12345
     let listen_addr = "/ip4/0.0.0.0/tcp/12345".parse::<Multiaddr>()?;
     swarm.listen_on(listen_addr)?;
+    // Also listen for WebSocket upgrades
+    let listen_addr_ws = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
+    swarm.listen_on(listen_addr_ws)?;
 
     // If a domain name is provided, also try listening on a DNS address.
     // This helps ensure the address is advertised correctly via Identify.
