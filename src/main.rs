@@ -660,7 +660,7 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let webtransport = WebTransport::new(webtransport_config);
 
         // Add special protocol support for Orbiter
-        let riffcc_protocol = StreamProtocol::new(RIFFCC_PROTOCOL);
+        let _riffcc_protocol = StreamProtocol::new(RIFFCC_PROTOCOL);
         info!("Adding support for Orbiter protocol: {}", RIFFCC_PROTOCOL);
 
         // Combine transports
@@ -971,9 +971,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let listen_addr_tcp = "/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?;
     swarm.listen_on(listen_addr_tcp)?;
 
-    // Listen on all interfaces for WebSocket on port 12345
+    // Listen on WebSocket port 12345 for nginx to connect to (but don't advertise it externally)
     let listen_addr_ws = "/ip4/0.0.0.0/tcp/12345/ws".parse::<Multiaddr>()?;
     swarm.listen_on(listen_addr_ws)?;
+    info!("Listening on WebSocket port 12345 for internal nginx connections (not advertised externally)");
 
     // Also listen on WebRTC multiaddr for direct peer connections
     match swarm.listen_on("/ip4/0.0.0.0/udp/0/webrtc-direct".parse()?) {
@@ -1004,18 +1005,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
 
-        // Add WS over 80 address (for plain WebSocket connections through Nginx)
-        let ws_addr = format!("/dns4/{}/tcp/80/ws/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
-        match ws_addr {
-            Ok(addr) => {
-                // Advertise the plain WebSocket address
-                swarm.add_external_address(addr.clone());
-                info!("Advertising WS address: {}", addr);
-            }
-            Err(e) => {
-                error!("Failed to parse WS address from domain {}: {}", domain, e);
-            }
-        }
+        // Do NOT advertise plain WebSocket (WS) over port 80 anymore
         
         // Also add WebRTC address with domain
         let webrtc_dns_addr = format!("/dns4/{}/udp/443/webrtc-direct/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
