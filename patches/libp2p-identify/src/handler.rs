@@ -51,7 +51,7 @@ use crate::{
 };
 
 const STREAM_TIMEOUT: Duration = Duration::from_secs(60);
-const MAX_CONCURRENT_STREAMS_PER_CONNECTION: usize = 50;
+const MAX_CONCURRENT_STREAMS_PER_CONNECTION: usize = 256;
 
 /// Protocol handler for sending and receiving identification requests.
 ///
