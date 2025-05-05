@@ -1,15 +1,15 @@
 use futures::stream::StreamExt;
+use futures::stream::StreamExt;
 use libp2p::{
     core::upgrade,
     identity,
-    multiaddr::Protocol,
     noise, ping, relay, identify,
-    swarm::{NetworkBehaviour, SwarmEvent, SwarmBuilder},
-    tcp, Multiaddr, PeerId, Transport,
+    swarm::{NetworkBehaviour, SwarmEvent},
+    tcp, Multiaddr, PeerId, Transport, SwarmBuilder,
 };
 use std::error::Error;
 use std::time::Duration;
-use tokio::runtime::Runtime;
+// Removed unused tokio::runtime::Runtime import
 use log::{info, error};
 
 // Define the network behaviour combining multiple protocols
@@ -125,10 +125,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
                         info!("Connection closed with: {}. Reason: {:?}", peer_id, cause);
                     }
-                    SwarmEvent::IncomingConnection { local_addr, send_back_addr } => {
+                    // Added `..` to ignore unmentioned fields like connection_id
+                    SwarmEvent::IncomingConnection { local_addr, send_back_addr, .. } => {
                         info!("Incoming connection from {} to {}", send_back_addr, local_addr);
                     }
-                    SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error } => {
+                    // Added `..` to ignore unmentioned fields like connection_id
+                    SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error, .. } => {
                         error!("Incoming connection error from {} to {}: {}", send_back_addr, local_addr, error);
                     }
                     SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
