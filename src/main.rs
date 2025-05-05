@@ -384,13 +384,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let listen_addr_ws_dns = format!("/dns4/{}/tcp/12345/ws", domain).parse::<Multiaddr>();
         match listen_addr_ws_dns {
             Ok(addr) => {
-                if let Err(e) = swarm.listen_on(addr.clone()) {
-                    // Log error if listening on DNS fails, but continue anyway
-                    error!("Failed to listen on DNS address {}: {}", addr, e);
-                }
+                // Advertise the DNS address rather than listening on it
+                swarm.add_external_address(addr.clone());
+                info!("Advertising DNS address: {}", addr);
             }
             Err(e) => {
-                 error!("Failed to parse DNS address from domain {}: {}", domain, e);
+                error!("Failed to parse DNS address from domain {}: {}", domain, e);
             }
         }
     }
