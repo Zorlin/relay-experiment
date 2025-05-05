@@ -330,8 +330,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Build the Swarm using the manually constructed transport and behaviour
     let mut swarm = SwarmBuilder::with_existing_identity(local_key.clone())
         .with_tokio()
-        .transport(transport, local_peer_id)
-        .behaviour(behaviour)
+        .with_other_transport(|_| Ok(transport))?
+        .with_behaviour(|_| Ok(behaviour))?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
