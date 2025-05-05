@@ -1,0 +1,19 @@
+syntax = "proto3";
+// Use a package name to avoid conflicts
+package relay.identity.proto;
+
+// Define KeyType enum matching libp2p expectations if possible,
+// but based on the user's definition structure.
+enum KeyType {
+  RSA = 0;
+  Ed25519 = 1;
+  Secp256k1 = 2;
+  ECDSA = 3;
+}
+
+// Define the PrivateKey message according to user's specification
+message PrivateKey {
+  KeyType type = 1;
+  // Expecting raw secret key bytes here (e.g., 32 bytes for Ed25519)
+  bytes data = 2;
+}
