@@ -829,22 +829,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
     swarm.add_external_address(webrtc_addr.clone());
     info!("Added external WebRTC address: {}", webrtc_addr);
 
-    // Listen on WebRTC Direct for UDP-based WebRTC connections
-    // Removed due to missing transport
-
-    // If a domain name is provided, also try listening on a DNS address.
-    // This helps ensure the address is advertised correctly via Identify.
+    // If a domain name is provided, add external addresses for Nginx proxying
     if let Some(domain) = &domain_name {
-        // Use dns4 for IPv4 or dns6 for IPv6, or just dns if agnostic
-        let listen_addr_ws_dns = format!("/dns4/{}/tcp/12345/ws", domain).parse::<Multiaddr>();
-        match listen_addr_ws_dns {
+        // Add WSS over 443 address (for secure WebSocket connections through Nginx)
+        let wss_addr = format!("/dns4/{}/tcp/443/wss/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        match wss_addr {
             Ok(addr) => {
-                // Advertise the DNS address rather than listening on it
+                // Advertise the secure WebSocket address
                 swarm.add_external_address(addr.clone());
-                info!("Advertising DNS address: {}", addr);
+                info!("Advertising WSS address: {}", addr);
             }
             Err(e) => {
-                error!("Failed to parse DNS address from domain {}: {}", domain, e);
+                error!("Failed to parse WSS address from domain {}: {}", domain, e);
+            }
+        }
+
+        // Add WS over 80 address (for plain WebSocket connections through Nginx)
+        let ws_addr = format!("/dns4/{}/tcp/80/ws/p2p/{}", domain, local_peer_id).parse::<Multiaddr>();
+        match ws_addr {
+            Ok(addr) => {
+                // Advertise the plain WebSocket address
+                swarm.add_external_address(addr.clone());
+                info!("Advertising WS address: {}", addr);
+            }
+            Err(e) => {
+                error!("Failed to parse WS address from domain {}: {}", domain, e);
             }
         }
     }
