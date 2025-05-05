@@ -1,0 +1,154 @@
+use futures::stream::StreamExt;
+use libp2p::{
+    core::upgrade,
+    identity,
+    multiaddr::Protocol,
+    noise, ping, relay, identify,
+    swarm::{NetworkBehaviour, SwarmEvent, SwarmBuilder},
+    tcp, Multiaddr, PeerId, Transport,
+};
+use std::error::Error;
+use std::time::Duration;
+use tokio::runtime::Runtime;
+use log::{info, error};
+
+// Define the network behaviour combining multiple protocols
+#[derive(NetworkBehaviour)]
+#[behaviour(to_swarm = "RelayEvent")]
+struct RelayBehaviour {
+    relay: relay::Behaviour,
+    ping: ping::Behaviour,
+    identify: identify::Behaviour,
+}
+
+// Define the custom event type that the behaviour emits to the Swarm
+// We aren't emitting custom events in this basic example, but this is where they would go.
+#[derive(Debug)]
+enum RelayEvent {
+    Relay(relay::Event),
+    Ping(ping::Event),
+    Identify(identify::Event),
+}
+
+impl From<relay::Event> for RelayEvent {
+    fn from(event: relay::Event) -> Self {
+        RelayEvent::Relay(event)
+    }
+}
+
+impl From<ping::Event> for RelayEvent {
+    fn from(event: ping::Event) -> Self {
+        RelayEvent::Ping(event)
+    }
+}
+
+impl From<identify::Event> for RelayEvent {
+    fn from(event: identify::Event) -> Self {
+        RelayEvent::Identify(event)
+    }
+}
+
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
+    info!("Starting Rust libp2p relay node...");
+
+    // Create a random keypair for the node's identity
+    let local_key = identity::Keypair::generate_ed25519();
+    let local_peer_id = PeerId::from(local_key.public());
+    info!("Local peer ID: {}", local_peer_id);
+
+    // Build the transport
+    // For this example, we use TCP with Noise encryption and Yamux multiplexing.
+    let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
+        .upgrade(upgrade::Version::V1Lazy)
+        .authenticate(noise::Config::new(&local_key)?)
+        .multiplex(libp2p::yamux::Config::default())
+        .timeout(Duration::from_secs(20))
+        .boxed();
+
+    // Create the Identify behaviour configuration
+    let identify_config = identify::Config::new(
+        "/libp2p-relay-rust/0.1.0".to_string(),
+        local_key.public(),
+    )
+    .with_agent_version(format!("rust-libp2p-relay/{}", env!("CARGO_PKG_VERSION")));
+
+
+    // Create the network behaviour
+    let behaviour = RelayBehaviour {
+        relay: relay::Behaviour::new(local_peer_id, Default::default()),
+        ping: ping::Behaviour::new(ping::Config::new()),
+        identify: identify::Behaviour::new(identify_config),
+    };
+
+    // Build the Swarm
+    let mut swarm = SwarmBuilder::with_tokio_executor(transport, behaviour, local_peer_id).build();
+
+    // Define listening addresses
+    // Listen on all interfaces on TCP port 0, which asks the OS for a free port.
+    let listen_addr_tcp = "/ip4/0.0.0.0/tcp/0".parse::<Multiaddr>()?;
+    swarm.listen_on(listen_addr_tcp)?;
+
+    // Listen on QUIC as well (optional, requires enabling the 'quic' feature in Cargo.toml)
+    // let listen_addr_quic = "/ip4/0.0.0.0/udp/0/quic-v1".parse::<Multiaddr>()?;
+    // swarm.listen_on(listen_addr_quic)?;
+
+
+    // Main event loop
+    loop {
+        tokio::select! {
+            event = swarm.select_next_some() => {
+                match event {
+                    SwarmEvent::NewListenAddr { address, .. } => {
+                        info!("Listening on: {}", address);
+                    }
+                    SwarmEvent::Behaviour(RelayEvent::Identify(identify::Event::Received { peer_id, info })) => {
+                        info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
+                        // Add addresses observed by Identify to the Swarm's address book
+                        for addr in info.listen_addrs {
+                             swarm.add_external_address(addr);
+                        }
+                    }
+                    SwarmEvent::Behaviour(RelayEvent::Ping(event)) => {
+                         info!("Ping event: {:?}", event);
+                    }
+                    SwarmEvent::Behaviour(RelayEvent::Relay(event)) => {
+                        info!("Relay event: {:?}", event);
+                        // Handle specific relay events if needed
+                    }
+                    SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                        info!("Connection established with: {} on {:?}", peer_id, endpoint.get_remote_address());
+                    }
+                    SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
+                        info!("Connection closed with: {}. Reason: {:?}", peer_id, cause);
+                    }
+                    SwarmEvent::IncomingConnection { local_addr, send_back_addr } => {
+                        info!("Incoming connection from {} to {}", send_back_addr, local_addr);
+                    }
+                    SwarmEvent::IncomingConnectionError { local_addr, send_back_addr, error } => {
+                        error!("Incoming connection error from {} to {}: {}", send_back_addr, local_addr, error);
+                    }
+                    SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
+                        error!("Outgoing connection error to {:?}: {}", peer_id, error);
+                    }
+                    SwarmEvent::ListenerError { listener_id, error } => {
+                        error!("Listener error for {:?}: {}", listener_id, error);
+                    }
+                     SwarmEvent::ListenerClosed { listener_id, reason, .. } => {
+                        info!("Listener {:?} closed: {:?}", listener_id, reason);
+                    }
+                    SwarmEvent::Dialing { peer_id, connection_id } => {
+                        info!("Dialing peer: {:?} (connection ID: {:?})", peer_id, connection_id);
+                    }
+                    _ => {
+                        // Handle other swarm events as needed
+                        // info!("Unhandled Swarm Event: {:?}", event);
+                    }
+                }
+            }
+        }
+    }
+}
