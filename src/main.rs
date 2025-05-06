@@ -1384,6 +1384,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 match identify_event {
                                     identify::Event::Received { peer_id, info, .. } => {
                                         info!("Identified Peer: {} with agent version: {}", peer_id, info.agent_version);
+                                        // Log the full received info struct
+                                        info!("[IDENTIFY RECV] Received Identify::Info from {}: {:#?}", peer_id, info);
                                         for addr in info.listen_addrs {
                                             // Keep duplicate check before adding
                                             let current_addrs = swarm.external_addresses().cloned().collect::<Vec<_>>();

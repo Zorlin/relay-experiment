@@ -164,6 +164,7 @@ impl Handler {
         match output {
             future::Either::Left(stream) => {
                 let info = self.build_info();
+                tracing::info!("[IDENTIFY SEND] Sending Identify::Info to {}: {:#?}", self.remote_peer_id, info);
 
                 if self
                     .active_streams
