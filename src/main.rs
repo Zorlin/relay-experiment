@@ -618,8 +618,14 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
         let tcp_transport = libp2p::tcp::tokio::Transport::new(libp2p::tcp::Config::default().nodelay(true))
             .upgrade(Version::V1Lazy)
             .authenticate(noise::Config::new(&local_key)?)
-            // Match TS: Only offer default Yamux
-            .multiplex(libp2p::yamux::Config::default())
+            // Re-add increased Yamux limits
+            .multiplex({
+                let mut yamux_config = libp2p::yamux::Config::default();
+                yamux_config.set_receive_window_size(16 * 1024 * 1024); // 16 MiB
+                // set_max_num_streams is still valid if needed, but often window size is primary
+                // yamux_config.set_max_num_streams(2048);
+                yamux_config
+            })
             .timeout(Duration::from_secs(20))
             .boxed();
 
@@ -650,8 +656,14 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
             libp2p::websocket::WsConfig::new(dns_tcp)
                 .upgrade(Version::V1Lazy)
                 .authenticate(noise::Config::new(&local_key)?)
-                // Match TS: Only offer default Yamux
-                .multiplex(libp2p::yamux::Config::default())
+                // Re-add increased Yamux limits
+                .multiplex({
+                    let mut yamux_config = libp2p::yamux::Config::default();
+                    yamux_config.set_receive_window_size(16 * 1024 * 1024); // 16 MiB
+                    // set_max_num_streams is still valid if needed, but often window size is primary
+                    // yamux_config.set_max_num_streams(2048);
+                    yamux_config
+                })
                 .timeout(Duration::from_secs(20))
                 .boxed()
         };
