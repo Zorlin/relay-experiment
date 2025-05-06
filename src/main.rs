@@ -1129,6 +1129,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         env::set_var("LIBP2P_WEBSOCKET_PRESERVE_DNS", "true");
         
         for addr in bootstrap_peers {
+            // Extract PeerId from address if possible
+            let skip_dial = if let Some(peer_id) = addr.iter().find_map(|p| match p {
+                // Revert to using from_multihash now that versions should match
+                libp2p::multiaddr::Protocol::P2p(hash) => PeerId::from_multihash(hash.into()).ok(),
+                _ => None,
+            }) {
+                peer_id == local_peer_id
+            } else {
+                false // No peer ID in address, cannot compare
+            };
+
+            if skip_dial {
+                info!("[DIAL SKIP] Skipping bootstrap address for local peer ID: {}", addr);
+                continue; // Skip dialing this address
+            }
+
+            // Log which address we are dialing
+            info!("[DIAL ATTEMPT] Attempting bootstrap dial to address: {}", addr);
+
             // Log whether the address is DNS-based or IP-based
             let uses_dns = addr.to_string().contains("/dns");
             
@@ -1298,6 +1317,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
             counters.num_established()
         );
     }
+
+    // --- RE-ADD Log Topic Hashes for Debugging ---
+    {
+        use libp2p::gossipsub::Sha256Topic;
+
+        let constellation_topic = Sha256Topic::new(CONSTELLATION_PEER_DISCOVERY_TOPIC);
+        let orbiter_device_topic = Sha256Topic::new(ORBITER_DEVICE_DISCOVERY_TOPIC);
+        let orbiter_content_topic = Sha256Topic::new(ORBITER_CONTENT_DISCOVERY_TOPIC);
+
+        info!("DEBUG Topic Hashes (Display Format):");
+        info!("  Constellation Peer Discovery: {}", constellation_topic.hash());
+        info!("  Orbiter Device Discovery:     {}", orbiter_device_topic.hash());
+        info!("  Orbiter Content Discovery:    {}", orbiter_content_topic.hash());
+    }
+    // --- End Log Topic Hashes ---
 
     // Main event loop
     loop {
