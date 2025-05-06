@@ -890,6 +890,15 @@ const ORBITER_DEVICE_DISCOVERY_TOPIC: &str = "orbiter._peer-discovery._p2p._pubs
 const ORBITER_CONTENT_DISCOVERY_TOPIC: &str = "orbiter._content-discovery._p2p._pubsub";
 const CONSTELLATION_PEER_DISCOVERY_TOPIC: &str = "constellation._peer-discovery._p2p._pubsub";
 
+// Pre-calculate topic hashes (assuming Sha256Topic is the correct type)
+// Removed redundant use statement
+use libp2p::gossipsub::{TopicHash};
+lazy_static::lazy_static! {
+    static ref CONSTELLATION_TOPIC_HASH: TopicHash = Sha256Topic::new(CONSTELLATION_PEER_DISCOVERY_TOPIC).hash();
+    static ref ORBITER_DEVICE_TOPIC_HASH: TopicHash = Sha256Topic::new(ORBITER_DEVICE_DISCOVERY_TOPIC).hash();
+    static ref ORBITER_CONTENT_TOPIC_HASH: TopicHash = Sha256Topic::new(ORBITER_CONTENT_DISCOVERY_TOPIC).hash();
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // Load environment variables from .env file, ignore errors (e.g., file not found)
@@ -1448,20 +1457,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         );
                                         // --- END TEMP DEBUG ---
 
-                                        // Check if this is a peer discovery message by comparing the topic string
-                                        let received_topic_str = message.topic.to_string();
-                                        if received_topic_str == CONSTELLATION_PEER_DISCOVERY_TOPIC ||
-                                           received_topic_str == ORBITER_DEVICE_DISCOVERY_TOPIC ||
-                                           received_topic_str == ORBITER_CONTENT_DISCOVERY_TOPIC {
+                                        // Check if this is a peer discovery message by comparing the TopicHash
+                                        if message.topic == *CONSTELLATION_TOPIC_HASH ||
+                                           message.topic == *ORBITER_DEVICE_TOPIC_HASH ||
+                                           message.topic == *ORBITER_CONTENT_TOPIC_HASH {
 
-                                            info!("Received peer discovery message from {:?} on topic {}", message.source, received_topic_str);
+                                            // Use the Display impl of TopicHash (base64) for logging clarity
+                                            info!("Received peer discovery message from {:?} on topic {}", message.source, message.topic);
 
                                             // Log raw content specifically for Orbiter discovery topics
-                                            if received_topic_str == ORBITER_DEVICE_DISCOVERY_TOPIC ||
-                                               received_topic_str == ORBITER_CONTENT_DISCOVERY_TOPIC {
+                                            if message.topic == *ORBITER_DEVICE_TOPIC_HASH ||
+                                               message.topic == *ORBITER_CONTENT_TOPIC_HASH {
                                                 info!(
                                                     "ORBITER DISCOVERY MESSAGE RAW CONTENT ({} bytes) on topic {}: {}",
-                                                    message.data.len(), received_topic_str, String::from_utf8_lossy(&message.data)
+                                                    message.data.len(), message.topic, String::from_utf8_lossy(&message.data)
                                                 );
                                             }
                                             

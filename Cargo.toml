@@ -24,6 +24,7 @@ serde_json = "1.0" # Added serde_json
 parking_lot = "0.12" # Added for Mutex, often preferred with async
 bytes = "1" # Added bytes crate dependency for prost
 rand = "0.8" # Add rand for generating certificates and random values
+lazy_static = "1.4.0" # For pre-calculating topic hashes
 
 # Add prost for protobuf handling
 prost = "0.13"
