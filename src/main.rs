@@ -85,6 +85,8 @@ struct RelayBehaviour {
     pubsub: Gossipsub, // Added gossipsub behaviour
     dcutr: dcutr::Behaviour, // Added DCUtR
     autonat: autonat::Behaviour, // Added AutoNAT
+    webrtc_signal: webrtc_signaling::Behaviour, // NEW
+    // webrtc: libp2p_webrtc::Behaviour, // REMOVED - Type doesn't exist in 0.9.0-alpha
 }
 
 // Define the custom event type that the behaviour emits to the Swarm.
@@ -98,6 +100,8 @@ enum RelayEvent {
     Pubsub(GossipsubEvent), // Added PubSub variant
     Dcutr(dcutr::Event),       // Added DCUtR variant
     AutoNat(autonat::Event),   // Added AutoNat variant
+    WebRtcSignaling(webrtc_signaling::Event), // NEW
+    // WebRtc(libp2p_webrtc::Event), // REMOVED - Type doesn't exist in 0.9.0-alpha
 }
 
 // Keep only one set of From implementations
@@ -134,6 +138,13 @@ impl From<dcutr::Event> for RelayEvent {
 impl From<autonat::Event> for RelayEvent {
     fn from(event: autonat::Event) -> Self {
         RelayEvent::AutoNat(event)
+    }
+}
+
+// NEW From impl for signaling behaviour
+impl From<webrtc_signaling::Event> for RelayEvent {
+    fn from(event: webrtc_signaling::Event) -> Self {
+        RelayEvent::WebRtcSignaling(event)
     }
 }
 
@@ -268,6 +279,8 @@ mod tests {
            ).unwrap(),
            dcutr: dcutr::Behaviour::new(local_peer_id),
            autonat: autonat::Behaviour::new(local_peer_id, autonat_config),
+           webrtc_signal: webrtc_signaling::Behaviour::new(), // NEW
+           // webrtc: libp2p_webrtc::tokio::Behaviour::new(), // REMOVED - Type doesn't exist in 0.9.0-alpha
        };
 
        assert!(true);
@@ -782,6 +795,8 @@ async fn build_swarm(local_key: Keypair, pubsub_topics: Option<String>) -> Resul
            pubsub: gossipsub,
            dcutr: dcutr::Behaviour::new(local_peer_id),
            autonat: autonat::Behaviour::new(local_peer_id, autonat_config),
+           webrtc_signal: webrtc_signaling::Behaviour::new(), // NEW
+           // webrtc: libp2p_webrtc::Behaviour::new(local_peer_id), // REMOVED - Type doesn't exist in 0.9.0-alpha
        }
     };
 
@@ -898,6 +913,8 @@ lazy_static::lazy_static! {
     static ref ORBITER_DEVICE_TOPIC_HASH: TopicHash = Sha256Topic::new(ORBITER_DEVICE_DISCOVERY_TOPIC).hash();
     static ref ORBITER_CONTENT_TOPIC_HASH: TopicHash = Sha256Topic::new(ORBITER_CONTENT_DISCOVERY_TOPIC).hash();
 }
+
+mod webrtc_signaling; // <<< ADD THIS LINE
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -1568,6 +1585,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         info!("AutoNAT inbound probe event: {:?}", e); 
                                     }
                                 }
+                            }
+                            RelayEvent::WebRtcSignaling(event) => { // NEW
+                                // TODO: Handle signaling events (e.g., log, process SDP)
+                                warn!("[TODO] Received WebRTC Signaling event: {:?}", event);
                             }
                         }
                     }
